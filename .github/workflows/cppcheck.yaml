@@ -1,0 +1,15 @@
+name: Run cppcheck
+on: [push]
+
+jobs:
+  cpp-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - name: Prepare
+        run: |
+          sudo apt install cppcheck -y
+      - name: Run cppcheck
+        run: |
+          cppcheck -q --enable=all -I include --suppress=useStlAlgorithm --suppress=unusedFunction  \
+                   --error-exitcode=-1 --suppress=unknownMacro --std=c++17 src/
