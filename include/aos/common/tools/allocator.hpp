@@ -183,7 +183,7 @@ public:
      *
      * @return size_t free size.
      */
-    size_t FreeSize()
+    size_t FreeSize() const
     {
         LockGuard lock(mMutex);
 
@@ -195,7 +195,7 @@ public:
      *
      * @return size_t max size.
      */
-    size_t MaxSize()
+    size_t MaxSize() const
     {
         LockGuard lock(mMutex);
 
@@ -207,7 +207,7 @@ public:
      *
      * @return size_t max allocated size.
      */
-    size_t MaxAllocatedSize()
+    size_t MaxAllocatedSize() const
     {
         LockGuard lock(mMutex);
 
@@ -251,7 +251,7 @@ private:
     Array<Allocation>* mAllocations      = {};
     size_t             mMaxSize          = {};
     size_t             mMaxAllocatedSize = {};
-    Mutex              mMutex;
+    mutable Mutex      mMutex;
 };
 
 /**

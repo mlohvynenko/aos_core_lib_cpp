@@ -95,7 +95,7 @@ private:
 
     RetWithError<SharedPtr<pkcs11::SessionContext>> OpenSession(
         const String& libraryPath, const String& token, const String& userPIN);
-    RetWithError<pkcs11::SlotID> FindToken(pkcs11::LibraryContext& library, const String& token);
+    RetWithError<pkcs11::SlotID> FindToken(const pkcs11::LibraryContext& library, const String& token);
 
     RetWithError<SharedPtr<crypto::x509::CertificateChain>> LoadCertsFromFile(const String& fileName);
     RetWithError<SharedPtr<crypto::PrivateKeyItf>>          LoadPrivKeyFromFile(const String& fileName);

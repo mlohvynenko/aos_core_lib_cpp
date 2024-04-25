@@ -41,8 +41,8 @@ namespace crypto {
 
 static int ASN1EncodeDERSequence(const Array<Array<uint8_t>>& items, unsigned char** p, unsigned char* start)
 {
-    size_t len = 0;
-    int    ret = 0;
+    size_t               len = 0;
+    [[maybe_unused]] int ret = 0;
 
     for (int i = items.Size() - 1; i >= 0; i--) {
         const auto& item = items[i];
@@ -58,7 +58,8 @@ static int ASN1EncodeDERSequence(const Array<Array<uint8_t>>& items, unsigned ch
 static int ASN1EncodeObjectIds(const Array<asn1::ObjectIdentifier>& oids, unsigned char** p, unsigned char* start)
 {
     size_t len = 0;
-    int    ret = 0;
+    // cppcheck-suppress variableScope
+    int ret;
 
     for (int i = oids.Size() - 1; i >= 0; i--) {
         const auto& oid = oids[i];
@@ -88,8 +89,8 @@ static int ASN1EncodeObjectIds(const Array<asn1::ObjectIdentifier>& oids, unsign
 
 static int ASN1EncodeBigInt(const Array<uint8_t>& number, unsigned char** p, unsigned char* start)
 {
-    size_t len = 0;
-    int    ret = 0;
+    size_t               len = 0;
+    [[maybe_unused]] int ret = 0;
 
     // Implementation currently uses a little endian integer format to make ECDSA::Sign(PKCS11)/Verify(mbedtls)
     // combination work.
@@ -417,7 +418,7 @@ Error MbedTLSCryptoProvider::X509CertToPEM(const x509::Certificate& certificate,
         return AOS_ERROR_WRAP(ret);
     }
 
-    if (olen <= 0) {
+    if (olen < 1) {
         return AOS_ERROR_WRAP(ErrorEnum::eFailed);
     }
 
@@ -454,7 +455,7 @@ Error MbedTLSCryptoProvider::ASN1EncodeDN(const String& commonName, Array<uint8_
         return AOS_ERROR_WRAP(ret);
     }
 
-    auto freeDN = DeferRelease(&dn, mbedtls_asn1_free_named_data_list);
+    [[maybe_unused]] auto freeDN = DeferRelease(&dn, mbedtls_asn1_free_named_data_list);
 
     result.Resize(result.MaxSize());
 

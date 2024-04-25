@@ -88,6 +88,11 @@ template <typename... VarArgs>
 class Variant {
 public:
     /**
+     * Constructs object instance.
+     */
+    Variant() = default;
+
+    /**
      * Sets new variant value.
      *
      * @param args... argument list for constructor of a new object.
@@ -211,6 +216,7 @@ struct GetBaseHelper : StaticVisitor<Base> {
 template <typename Base, typename Var>
 Base& GetBase(Var& variant)
 {
+    // cppcheck-suppress returnTempReference
     return variant.ApplyVisitor(GetBaseHelper<Base&> {});
 }
 
@@ -225,6 +231,7 @@ Base& GetBase(Var& variant)
 template <typename Base, typename Var>
 const Base& GetBase(const Var& variant)
 {
+    // cppcheck-suppress returnTempReference
     return variant.ApplyVisitor(GetBaseHelper<const Base&> {});
 }
 

@@ -218,7 +218,6 @@ public:
         return *this;
     }
 
-    // cppcheck-suppress noExplicitConstructor
     /**
      * Creates static function from functor.
      *
@@ -227,6 +226,7 @@ public:
      * @param arg functor argument.
      */
     template <typename T>
+    // cppcheck-suppress noExplicitConstructor
     StaticFunction(T functor, void* arg = nullptr)
     {
         Function::SetBuffer(mBuffer);

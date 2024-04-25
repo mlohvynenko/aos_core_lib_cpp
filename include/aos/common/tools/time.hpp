@@ -239,8 +239,6 @@ public:
      */
     friend Log& operator<<(Log& log, const Time& obj)
     {
-        static constexpr auto cTimeStrLen = 32;
-
         tm                        buf;
         StaticString<cTimeStrLen> utcTimeStr;
 

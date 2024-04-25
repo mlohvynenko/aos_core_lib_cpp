@@ -197,14 +197,15 @@ private:
     Error CreateURL(const String& label, const Array<uint8_t>& id, String& url);
     Error ParseURL(const String& url, String& label, Array<uint8_t>& id);
 
-    Error GetValidInfo(pkcs11::SessionContext& session, Array<SearchObject>& certs, Array<SearchObject>& privKeys,
+    Error GetValidInfo(const pkcs11::SessionContext& session, Array<SearchObject>& certs, Array<SearchObject>& privKeys,
         Array<SearchObject>& pubKeys, Array<CertInfo>& resCerts);
     SearchObject* FindObjectByID(Array<SearchObject>& array, const Array<uint8_t>& id);
-    Error GetX509Cert(pkcs11::SessionContext& session, pkcs11::ObjectHandle object, crypto::x509::Certificate& cert);
+    Error         GetX509Cert(
+                const pkcs11::SessionContext& session, pkcs11::ObjectHandle object, crypto::x509::Certificate& cert);
     Error CreateCertInfo(const crypto::x509::Certificate& cert, const Array<uint8_t>& keyID,
         const Array<uint8_t>& certID, CertInfo& certInfo);
     Error CreateInvalidURLs(const Array<SearchObject>& objects, Array<StaticString<cURLLen>>& urls);
-    void  PrintInvalidObjects(const String& objectType, Array<SearchObject>& objects);
+    void  PrintInvalidObjects(const String& objectType, const Array<SearchObject>& objects);
 
     StaticString<cCertTypeLen> mCertType;
     PKCS11ModuleConfig         mConfig {};

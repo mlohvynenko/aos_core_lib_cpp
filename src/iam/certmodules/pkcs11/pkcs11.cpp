@@ -804,7 +804,7 @@ Error PKCS11Module::CreateCertificateChain(const SharedPtr<pkcs11::SessionContex
 
 Error PKCS11Module::CreateURL(const String& label, const Array<uint8_t>& id, String& url)
 {
-    const auto AddParam = [](const aos::String name, const aos::String param, bool opaque, String& paramList) {
+    const auto AddParam = [](const aos::String& name, const aos::String& param, bool opaque, String& paramList) {
         if (!paramList.IsEmpty()) {
             paramList.Append(opaque ? ";" : "&");
         }
@@ -862,7 +862,7 @@ Error PKCS11Module::ParseURL(const String& url, String& label, Array<uint8_t>& i
     return ErrorEnum::eNone;
 }
 
-Error PKCS11Module::GetValidInfo(pkcs11::SessionContext& session, Array<SearchObject>& certs,
+Error PKCS11Module::GetValidInfo(const pkcs11::SessionContext& session, Array<SearchObject>& certs,
     Array<SearchObject>& privKeys, Array<SearchObject>& pubKeys, Array<CertInfo>& resCerts)
 {
     for (auto privKey = privKeys.begin(); privKey != privKeys.end();) {
@@ -938,7 +938,7 @@ PKCS11Module::SearchObject* PKCS11Module::FindObjectByID(Array<SearchObject>& ar
 }
 
 Error PKCS11Module::GetX509Cert(
-    pkcs11::SessionContext& session, pkcs11::ObjectHandle object, crypto::x509::Certificate& cert)
+    const pkcs11::SessionContext& session, pkcs11::ObjectHandle object, crypto::x509::Certificate& cert)
 {
     static constexpr auto cSingleAttribute = 1;
 
@@ -1002,7 +1002,7 @@ Error PKCS11Module::CreateInvalidURLs(const Array<SearchObject>& objects, Array<
     return ErrorEnum::eNone;
 }
 
-void PKCS11Module::PrintInvalidObjects(const String& objectType, Array<SearchObject>& objects)
+void PKCS11Module::PrintInvalidObjects(const String& objectType, const Array<SearchObject>& objects)
 {
     for (const auto& object : objects) {
         LOG_WRN() << "Invalid " << objectType << " found: certType = " << mCertType

@@ -738,6 +738,7 @@ psa_status_t psa_import_key_into_slot(
     uint8_t *key_buffer, size_t key_buffer_size,
     size_t *key_buffer_length, size_t *bits)
 {
+    // cppcheck-suppress unreadVariable
     psa_status_t status = PSA_ERROR_CORRUPTION_DETECTED;
     psa_key_type_t type = attributes->type;
 
@@ -3056,6 +3057,7 @@ psa_status_t psa_sign_message_builtin(
     size_t signature_size,
     size_t *signature_length)
 {
+    // cppcheck-suppress unreadVariable
     psa_status_t status = PSA_ERROR_CORRUPTION_DETECTED;
 
     if (PSA_ALG_IS_SIGN_HASH(alg)) {
@@ -3115,6 +3117,7 @@ psa_status_t psa_verify_message_builtin(
     const uint8_t *signature,
     size_t signature_length)
 {
+    // cppcheck-suppress unreadVariable
     psa_status_t status = PSA_ERROR_CORRUPTION_DETECTED;
 
     if (PSA_ALG_IS_SIGN_HASH(alg)) {
@@ -3816,6 +3819,8 @@ psa_status_t mbedtls_psa_sign_hash_start(
     const uint8_t *hash, size_t hash_length)
 {
     psa_status_t status = PSA_ERROR_CORRUPTION_DETECTED;
+
+    // cppcheck-suppress unassignedVariable
     size_t required_hash_length;
 
     if (!PSA_KEY_TYPE_IS_ECC(attributes->type)) {
@@ -4236,6 +4241,8 @@ static psa_status_t psa_generate_random_internal(uint8_t *output,
             return mbedtls_to_psa_error(ret);
         }
         output_size -= request_size;
+
+        // cppcheck-suppress unreadVariable
         output += request_size;
     }
     return PSA_SUCCESS;
@@ -6681,6 +6688,7 @@ static int psa_key_derivation_allows_free_form_secret_input(
 psa_status_t psa_key_derivation_setup(psa_key_derivation_operation_t *operation,
                                       psa_algorithm_t alg)
 {
+    // cppcheck-suppress unassignedVariable
     psa_status_t status;
 
     if (operation->alg != 0) {
@@ -7810,6 +7818,7 @@ psa_status_t mbedtls_psa_inject_entropy(const uint8_t *seed,
 static psa_status_t psa_validate_key_type_and_size_for_key_generation(
     psa_key_type_t type, size_t bits)
 {
+    // cppcheck-suppress unreadVariable
     psa_status_t status = PSA_ERROR_CORRUPTION_DETECTED;
 
     if (key_type_is_raw_bytes(type)) {
@@ -7861,6 +7870,7 @@ psa_status_t psa_generate_key_internal(
     const psa_key_production_parameters_t *params, size_t params_data_length,
     uint8_t *key_buffer, size_t key_buffer_size, size_t *key_buffer_length)
 {
+    // cppcheck-suppress unreadVariable
     psa_status_t status = PSA_ERROR_CORRUPTION_DETECTED;
     psa_key_type_t type = attributes->type;
 

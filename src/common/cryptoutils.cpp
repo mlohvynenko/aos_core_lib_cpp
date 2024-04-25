@@ -153,7 +153,7 @@ RetWithError<SharedPtr<pkcs11::SessionContext>> CertLoader::OpenSession(
     return {Move(session), ErrorEnum::eNone};
 }
 
-RetWithError<pkcs11::SlotID> CertLoader::FindToken(pkcs11::LibraryContext& library, const String& token)
+RetWithError<pkcs11::SlotID> CertLoader::FindToken(const pkcs11::LibraryContext& library, const String& token)
 {
     StaticArray<pkcs11::SlotID, pkcs11::cSlotListSize> slotList;
     auto                                               tokenInfo = MakeUnique<pkcs11::TokenInfo>(&mAllocator);
