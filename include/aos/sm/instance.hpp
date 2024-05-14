@@ -156,7 +156,7 @@ private:
     runner::RunnerItf&              mRunner;
     monitoring::ResourceMonitorItf& mResourceMonitor;
     uint64_t                        mAosVersion = 0;
-    const Service*                  mService;
+    const Service*                  mService    = nullptr;
     InstanceRunState                mRunState;
     Error                           mRunError;
 };

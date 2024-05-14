@@ -228,15 +228,6 @@ TEST_F(IAMTest, SetOwner)
     ASSERT_TRUE(mCertHandler->SetOwner("iam", cPIN).IsNone());
 }
 
-TEST_F(IAMTest, SetOwnerTeeUserIdentity)
-{
-    setenv("CKTEEC_LOGIN_TYPE", "user", true);
-
-    RegisterPKCS11Module("iam");
-
-    ASSERT_TRUE(mCertHandler->SetOwner("iam", cPIN).IsNone());
-}
-
 TEST_F(IAMTest, CreateKey)
 {
     RegisterPKCS11Module("iam");

@@ -5,7 +5,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-#include <gtest/gtest.h>
+#include <gmock/gmock.h>
 
 #include "aos/common/tools/memory.hpp"
 
@@ -28,7 +28,7 @@ TEST(MemoryTest, UniquePtr)
     // Basic test
 
     {
-        UniquePtr<uint32_t> uPtr(&allocator, new (&allocator) uint32_t());
+        UniquePtr<uint32_t> uPtr = MakeUnique<uint32_t>(&allocator, 0);
         EXPECT_EQ(allocator.FreeSize(), allocator.MaxSize() - sizeof(uint32_t));
     }
 
@@ -43,7 +43,7 @@ TEST(MemoryTest, UniquePtr)
     EXPECT_TRUE(nullptr == uPtr);
 
     {
-        uPtr = UniquePtr<uint32_t>(&allocator, new (&allocator) uint32_t());
+        uPtr = MakeUnique<uint32_t>(&allocator);
     }
 
     EXPECT_EQ(allocator.FreeSize(), allocator.MaxSize() - sizeof(uint32_t));
@@ -142,4 +142,25 @@ TEST(MemoryTest, SharedPtrDerivedClass)
     }
 
     EXPECT_EQ(allocator.FreeSize(), allocator.MaxSize());
+}
+
+TEST(MemoryTest, DeferRelease)
+{
+    int                               dummy = 0x42;
+    testing::MockFunction<void(int*)> deleter;
+
+    EXPECT_CALL(deleter, Call(&dummy)).Times(1);
+    {
+        auto defer = DeferRelease(&dummy, deleter.AsStdFunction());
+    }
+}
+
+TEST(MemoryTest, DeferReleaseNoOpForNull)
+{
+    testing::MockFunction<void(int*)> deleter;
+
+    EXPECT_CALL(deleter, Call(testing::_)).Times(0);
+    {
+        auto defer = DeferRelease(static_cast<int*>(nullptr), deleter.AsStdFunction());
+    }
 }

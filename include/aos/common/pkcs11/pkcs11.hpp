@@ -624,15 +624,15 @@ private:
     static constexpr auto cSessionsMaxCount = AOS_CONFIG_PKCS11_SESSION_POOL_MAX_SIZE;
 
     struct SessionParams {
-        SlotID mSlotID;
-        Flags  mFlags;
+        SlotID mSlotID = 0;
+        Flags  mFlags  = 0;
 
         bool operator==(const SessionParams& other) const { return mSlotID == other.mSlotID && mFlags == other.mFlags; }
     };
 
     RetWithError<SharedPtr<SessionContext>> PKCS11OpenSession(SlotID slotID, Flags flags);
 
-    CK_FUNCTION_LIST_PTR                                      mFunctionList;
+    CK_FUNCTION_LIST_PTR                                      mFunctionList = nullptr;
     StaticAllocator<sizeof(SessionContext) * cSessionsPerLib> mAllocator;
 
     StaticArray<Pair<SessionParams, SharedPtr<SessionContext>>, cSessionsMaxCount> mSessions;
@@ -661,8 +661,8 @@ public:
      * @param privHandle private key handle.
      * @param pubHandle public key handle.
      */
-    PrivateKey(
-        ObjectHandle privHandle = 0, ObjectHandle pubHandle = 0, SharedPtr<crypto::PrivateKeyItf> privKey = nullptr)
+    PrivateKey(ObjectHandle privHandle = 0, ObjectHandle pubHandle = 0,
+        const SharedPtr<crypto::PrivateKeyItf>& privKey = nullptr)
         : mPrivHandle(privHandle)
         , mPubHandle(pubHandle)
         , mPrivKey(privKey)

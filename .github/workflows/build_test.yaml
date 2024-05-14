@@ -18,13 +18,14 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
       - name: Prepare
         run: |
           sudo apt install lcov libsofthsm2 -y
+
       - name: Build and test
         run: |
           mkdir build
@@ -34,7 +35,7 @@ jobs:
           make; make tests; make coverage
 
       - name: Upload codecov report
-        uses: codecov/codecov-action@v3
+        uses: codecov/codecov-action@v4
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: ./build/coverage.total

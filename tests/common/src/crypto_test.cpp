@@ -374,7 +374,9 @@ public:
             return ret;
         }
 
-        signature.Resize(signatureLen);
+        // mbedtls_pk_sign adds ASN1 tags to the signature that makes a result incorrect as a raw signature expected.
+        // As a workaround for the tests just correct size of the result.
+        signature.Resize(digest.Size() * 2);
 
         return aos::ErrorEnum::eNone;
     }

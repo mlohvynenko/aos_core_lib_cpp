@@ -23,6 +23,7 @@ public:
      */
     Optional() = default;
 
+    // cppcheck-suppress noExplicitConstructor
     /**
      * Creates optional instance and initializes it with the value object.
      *

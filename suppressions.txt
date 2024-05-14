@@ -1,0 +1,4 @@
+useStlAlgorithm
+unusedFunction
+toomanyconfigs
+missingInclude

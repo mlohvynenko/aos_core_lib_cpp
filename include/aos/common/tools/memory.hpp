@@ -13,6 +13,59 @@
 namespace aos {
 
 /**
+ * Default deleter invokes delete operator for the given pointer.
+ */
+template <typename T>
+class DefaultDeleter : public NonCopyable {
+public:
+    /**
+     * Constructor that takes a pointer to allocator.
+     *
+     * @param allocator input allocator.
+     */
+    DefaultDeleter(Allocator* allocator = nullptr)
+        : mAllocator(allocator)
+    {
+    }
+
+    /**
+     * Move constructor for a DefaultDeleter of a derived class.
+     */
+    template <typename P>
+    DefaultDeleter(DefaultDeleter<P>&& other)
+    {
+        *this = Move(other);
+    }
+
+    /**
+     * Move assignment operator for a DefaultDeleter of a derived class.
+     */
+    template <typename P>
+    DefaultDeleter& operator=(DefaultDeleter<P>&& other)
+    {
+        mAllocator = other.mAllocator;
+
+        return *this;
+    }
+
+    /**
+     * Destroys object & deallocates memory.
+     *
+     * @ptr input pointer.
+     */
+    void operator()(T* ptr)
+    {
+        if (mAllocator) {
+            ptr->~T();
+            operator delete(ptr, mAllocator);
+        }
+    }
+
+private:
+    Allocator* mAllocator;
+};
+
+/**
  * Smart pointer instance.
  *
  * @tparam T holding object type.
@@ -122,35 +175,42 @@ private:
  *
  * @tparam T holding object type.
  */
-template <typename T>
-class UniquePtr : public SmartPtr<T>, private NonCopyable {
+template <typename T, typename Deleter = DefaultDeleter<T>>
+class UniquePtr : private NonCopyable {
 public:
     /**
-     * Creates unique pointer.
+     * Default constructor.
+     *
+     * @param ptr pointer to an object to be destroyed.
+     * @param deleter functor destroying the object.
+     *
      */
-    using SmartPtr<T>::SmartPtr;
+    UniquePtr(T* ptr = nullptr, Deleter&& deleter = Deleter())
+        : mObject(ptr)
+        , mDeleter(Move(deleter))
+    {
+    }
 
     /**
      * Unique pointer move constructor.
      *
      * @param ptr unique pointer to move from.
      */
-    UniquePtr(UniquePtr&& ptr)
-        : SmartPtr<T>(ptr.GetAllocator(), ptr.Get())
-    {
-        ptr.Release();
-    }
+    UniquePtr(UniquePtr&& ptr) { *this = Move(ptr); }
 
     /**
      * Unique pointer move assignment.
      *
      * @param ptr unique pointer to assign from.
      */
-    void operator=(UniquePtr&& ptr)
+    UniquePtr& operator=(UniquePtr&& ptr)
     {
-        SmartPtr<T>::Reset(ptr.GetAllocator(), ptr.Get());
+        mObject  = ptr.mObject;
+        mDeleter = Move(ptr.mDeleter);
 
         ptr.Release();
+
+        return *this;
     }
 
     /**
@@ -158,11 +218,10 @@ public:
      *
      * @param ptr unique pointer to move from.
      */
-    template <typename P>
-    UniquePtr(UniquePtr<P>&& ptr)
-        : SmartPtr<T>(ptr.GetAllocator(), ptr.Get())
+    template <typename P, typename D>
+    UniquePtr(UniquePtr<P, D>&& ptr)
     {
-        ptr.Release();
+        *this = Move(ptr);
     }
 
     /**
@@ -170,18 +229,82 @@ public:
      *
      * @param ptr unique pointer to assign from.
      */
-    template <typename P>
-    void operator=(UniquePtr<P>&& ptr)
+    template <typename P, typename D>
+    UniquePtr& operator=(UniquePtr<P, D>&& ptr)
     {
-        SmartPtr<T>::Reset(ptr.GetAllocator(), ptr.Get());
+        mObject  = ptr.mObject;
+        mDeleter = Move(ptr.mDeleter);
 
         ptr.Release();
+
+        return *this;
     }
 
     /**
-     * Destroys unique pointer.
+     * Resets unique pointer.
      */
-    ~UniquePtr() { SmartPtr<T>::Reset(); }
+    void Reset()
+    {
+        if (mObject) {
+            mDeleter(mObject);
+            mObject = nullptr;
+        }
+    }
+
+    /**
+     * Releases stored pointer.
+     */
+    void Release()
+    {
+        mObject  = nullptr;
+        mDeleter = Deleter();
+    }
+
+    /**
+     * Checks if pointer holds object.
+     *
+     * @return bool.
+     */
+    explicit operator bool() const { return mObject != nullptr; }
+
+    /**
+     * Compares two unique pointers.
+     *
+     * @param ptr1 first smart pointer.
+     * @param ptr2 second smart pointer.
+     * @return bool.
+     */
+    friend bool operator==(const UniquePtr& ptr1, const UniquePtr& ptr2) { return ptr1.mObject == ptr2.mObject; }
+
+    /**
+     * Returns holding object.
+     *
+     * @return T* holding object.
+     */
+    T* Get() const { return mObject; }
+
+    /**
+     * Provides access to holding object fields.
+     *
+     * @return T* holding object pointer.
+     */
+    T* operator->() const { return mObject; }
+
+    /**
+     * Dereferences holding object.
+     *
+     * @return T& holding object value.
+     */
+    T& operator*() const { return *(mObject); }
+
+    /**
+     * Destroys object.
+     */
+    ~UniquePtr() { Reset(); }
+
+private:
+    T*      mObject;
+    Deleter mDeleter;
 };
 
 /**
@@ -241,6 +364,7 @@ public:
      * @param ptr pointer to create from.
      */
     template <typename P>
+    // cppcheck-suppress noExplicitConstructor
     SharedPtr(const SharedPtr<P>& ptr)
         : SmartPtr<T>(ptr.GetAllocator(), ptr.Get())
         , mAllocation(ptr.mAllocation)
@@ -315,7 +439,22 @@ inline UniquePtr<T> MakeUnique(Allocator* allocator, Args&&... args)
 {
     assert(allocator);
 
-    return UniquePtr<T>(allocator, new (allocator) T(args...));
+    return UniquePtr<T>(new (allocator) T(args...), DefaultDeleter<T>(allocator));
+}
+
+/**
+ * Defers object destruction till the end of the current scope.
+ *
+ * @tparam T type of the object to be destroyed.
+ * @tparam Deleter type of the deleter.
+ * @param ptr pointer to the object to be destroyed.
+ * @param deleter functor object to be deferred.
+ * @return UniquePtr<T, Deleter>.
+ */
+template <typename T, typename Deleter>
+inline UniquePtr<T, Deleter> DeferRelease(T* ptr, Deleter&& deleter)
+{
+    return UniquePtr<T, Deleter>(ptr, Move(deleter));
 }
 
 /**
