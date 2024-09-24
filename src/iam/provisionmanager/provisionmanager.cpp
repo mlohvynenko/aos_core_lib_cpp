@@ -145,4 +145,18 @@ Error ProvisionManager::GetCert(
     return AOS_ERROR_WRAP(mCertHandler->GetCertificate(certType, issuer, serial, resCert));
 }
 
+Error ProvisionManager::SubscribeCertChanged(const String& certType, certhandler::CertReceiverItf& certReceiver)
+{
+    LOG_DBG() << "Subscribe cert receiver: type = " << certType;
+
+    return AOS_ERROR_WRAP(mCertHandler->SubscribeCertChanged(certType, certReceiver));
+}
+
+Error ProvisionManager::UnsubscribeCertChanged(certhandler::CertReceiverItf& certReceiver)
+{
+    LOG_DBG() << "Unsubscribe cert receiver";
+
+    return AOS_ERROR_WRAP(mCertHandler->UnsubscribeCertChanged(certReceiver));
+}
+
 } // namespace aos::iam::provisionmanager
