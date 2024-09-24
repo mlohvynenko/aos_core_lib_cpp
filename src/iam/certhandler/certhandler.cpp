@@ -8,9 +8,7 @@
 #include "aos/iam/certhandler.hpp"
 #include "log.hpp"
 
-namespace aos {
-namespace iam {
-namespace certhandler {
+namespace aos::iam::certhandler {
 
 /***********************************************************************************************************************
  * Public
@@ -125,7 +123,7 @@ Error CertHandler::ApplyCertificate(const String& certType, const String& pemCer
         return AOS_ERROR_WRAP(err);
     }
 
-    return ErrorEnum::eNone;
+    return UpdateCerts(*module);
 }
 
 Error CertHandler::GetCertificate(
@@ -155,6 +153,47 @@ Error CertHandler::GetCertificate(
     return ErrorEnum::eNone;
 }
 
+Error CertHandler::SubscribeCertChanged(const String& certType, CertReceiverItf& certReceiver)
+{
+    LockGuard lock(mMutex);
+
+    LOG_DBG() << "Subscribe certificate receiver: type = " << certType;
+
+    auto* module = FindModule(certType);
+    if (module == nullptr) {
+        return AOS_ERROR_WRAP(ErrorEnum::eNotFound);
+    }
+
+    CertInfo certInfo;
+
+    auto err = module->GetCertificate(Array<uint8_t>(), Array<uint8_t>(), certInfo);
+    if (!err.IsNone()) {
+        return AOS_ERROR_WRAP(err);
+    }
+
+    err = mCertReceiverSubscriptions.EmplaceBack(certType, certInfo, &certReceiver);
+    if (!err.IsNone()) {
+        return AOS_ERROR_WRAP(err);
+    }
+
+    return ErrorEnum::eNone;
+}
+
+Error CertHandler::UnsubscribeCertChanged(CertReceiverItf& certReceiver)
+{
+    LockGuard lock(mMutex);
+
+    Error                     err          = ErrorEnum::eNone;
+    CertReceiverSubscription* subscription = nullptr;
+
+    Tie(subscription, err)
+        = mCertReceiverSubscriptions.Remove([&certReceiver](const CertReceiverSubscription& subscription) {
+              return subscription.mReceiver == &certReceiver;
+          });
+
+    return err;
+}
+
 Error CertHandler::CreateSelfSignedCert(const String& certType, const String& password)
 {
     LockGuard lock(mMutex);
@@ -171,12 +210,7 @@ Error CertHandler::CreateSelfSignedCert(const String& certType, const String& pa
         return AOS_ERROR_WRAP(err);
     }
 
-    return ErrorEnum::eNone;
-}
-
-CertHandler::~CertHandler()
-{
-    LOG_DBG() << "Close certificate handler";
+    return UpdateCerts(*module);
 }
 
 RetWithError<ModuleConfig> CertHandler::GetModuleConfig(const String& certType) const
@@ -191,6 +225,11 @@ RetWithError<ModuleConfig> CertHandler::GetModuleConfig(const String& certType) 
     return {module->GetModuleConfig(), ErrorEnum::eNone};
 }
 
+CertHandler::~CertHandler()
+{
+    LOG_DBG() << "Close certificate handler";
+}
+
 /***********************************************************************************************************************
  * Private
  **********************************************************************************************************************/
@@ -202,6 +241,27 @@ CertModule* CertHandler::FindModule(const String& certType) const
     return !module.mError.IsNone() ? nullptr : *module.mValue;
 }
 
-} // namespace certhandler
-} // namespace iam
-} // namespace aos
+Error CertHandler::UpdateCerts(CertModule& certModule)
+{
+    CertInfo certInfo;
+
+    auto err = certModule.GetCertificate(Array<uint8_t>(), Array<uint8_t>(), certInfo);
+    if (!err.IsNone()) {
+        return AOS_ERROR_WRAP(err);
+    }
+
+    for (auto& subscription : mCertReceiverSubscriptions) {
+        if (subscription.mCertType != certModule.GetCertType()) {
+            continue;
+        }
+
+        if (subscription.mCertInfo != certInfo) {
+            subscription.mReceiver->OnCertChanged(certInfo);
+            subscription.mCertInfo = certInfo;
+        }
+    }
+
+    return ErrorEnum::eNone;
+}
+
+} // namespace aos::iam::certhandler
