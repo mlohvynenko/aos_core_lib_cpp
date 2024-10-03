@@ -21,7 +21,7 @@ CertHandler::CertHandler()
 
 Error CertHandler::RegisterModule(CertModule& module)
 {
-    LockGuard lock(mMutex);
+    LockGuard lock {mMutex};
 
     LOG_INF() << "Register module: type = " << module.GetCertType();
 
@@ -30,7 +30,7 @@ Error CertHandler::RegisterModule(CertModule& module)
 
 Error CertHandler::GetCertTypes(Array<StaticString<cCertTypeLen>>& certTypes)
 {
-    LockGuard lock(mMutex);
+    LockGuard lock {mMutex};
 
     LOG_DBG() << "Get all registered IAM certificate types";
 
@@ -46,7 +46,7 @@ Error CertHandler::GetCertTypes(Array<StaticString<cCertTypeLen>>& certTypes)
 
 Error CertHandler::SetOwner(const String& certType, const String& password)
 {
-    LockGuard lock(mMutex);
+    LockGuard lock {mMutex};
 
     LOG_DBG() << "Set owner: type = " << certType;
 
@@ -65,7 +65,7 @@ Error CertHandler::SetOwner(const String& certType, const String& password)
 
 Error CertHandler::Clear(const String& certType)
 {
-    LockGuard lock(mMutex);
+    LockGuard lock {mMutex};
 
     LOG_DBG() << "Clear all certificates: type = " << certType;
 
@@ -85,7 +85,7 @@ Error CertHandler::Clear(const String& certType)
 Error CertHandler::CreateKey(
     const String& certType, const String& subjectCommonName, const String& password, String& pemCSR)
 {
-    LockGuard lock(mMutex);
+    LockGuard lock {mMutex};
 
     LOG_DBG() << "Create key: type = " << certType << ", subject = " << subjectCommonName;
 
@@ -109,7 +109,7 @@ Error CertHandler::CreateKey(
 
 Error CertHandler::ApplyCertificate(const String& certType, const String& pemCert, CertInfo& info)
 {
-    LockGuard lock(mMutex);
+    LockGuard lock {mMutex};
 
     LOG_DBG() << "Apply cert: type = " << certType;
 
@@ -129,7 +129,7 @@ Error CertHandler::ApplyCertificate(const String& certType, const String& pemCer
 Error CertHandler::GetCertificate(
     const String& certType, const Array<uint8_t>& issuer, const Array<uint8_t>& serial, CertInfo& resCert)
 {
-    LockGuard lock(mMutex);
+    LockGuard lock {mMutex};
 
     StaticString<crypto::cSerialNumStrLen> serialInHex;
 
@@ -155,7 +155,7 @@ Error CertHandler::GetCertificate(
 
 Error CertHandler::SubscribeCertChanged(const String& certType, CertReceiverItf& certReceiver)
 {
-    LockGuard lock(mMutex);
+    LockGuard lock {mMutex};
 
     LOG_DBG() << "Subscribe certificate receiver: type = " << certType;
 
@@ -181,7 +181,7 @@ Error CertHandler::SubscribeCertChanged(const String& certType, CertReceiverItf&
 
 Error CertHandler::UnsubscribeCertChanged(CertReceiverItf& certReceiver)
 {
-    LockGuard lock(mMutex);
+    LockGuard lock {mMutex};
 
     Error                     err          = ErrorEnum::eNone;
     CertReceiverSubscription* subscription = nullptr;
@@ -196,7 +196,7 @@ Error CertHandler::UnsubscribeCertChanged(CertReceiverItf& certReceiver)
 
 Error CertHandler::CreateSelfSignedCert(const String& certType, const String& password)
 {
-    LockGuard lock(mMutex);
+    LockGuard lock {mMutex};
 
     LOG_DBG() << "Create self signed cert: type = " << certType;
 
@@ -215,7 +215,7 @@ Error CertHandler::CreateSelfSignedCert(const String& certType, const String& pa
 
 RetWithError<ModuleConfig> CertHandler::GetModuleConfig(const String& certType) const
 {
-    LockGuard lock(mMutex);
+    LockGuard lock {mMutex};
 
     auto* module = FindModule(certType);
     if (module == nullptr) {

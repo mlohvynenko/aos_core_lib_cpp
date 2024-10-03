@@ -20,7 +20,7 @@ namespace permhandler {
 RetWithError<StaticString<cSecretLen>> PermHandler::RegisterInstance(
     const InstanceIdent& instanceIdent, const Array<FunctionalServicePermissions>& instancePermissions)
 {
-    LockGuard lock(mMutex);
+    LockGuard lock {mMutex};
 
     LOG_DBG() << "Register instance: instance = " << instanceIdent;
 
@@ -44,7 +44,7 @@ RetWithError<StaticString<cSecretLen>> PermHandler::RegisterInstance(
 
 Error PermHandler::UnregisterInstance(const InstanceIdent& instanceIdent)
 {
-    LockGuard lock(mMutex);
+    LockGuard lock {mMutex};
 
     LOG_DBG() << "Unregister instance: instance = " << instanceIdent;
 
@@ -61,7 +61,7 @@ Error PermHandler::UnregisterInstance(const InstanceIdent& instanceIdent)
 Error PermHandler::GetPermissions(const String& secret, const String& funcServerID, InstanceIdent& instanceIdent,
     Array<PermKeyValue>& servicePermissions)
 {
-    LockGuard lock(mMutex);
+    LockGuard lock {mMutex};
 
     LOG_DBG() << "Get permission: secret = " << secret << ", funcServerID = " << funcServerID;
 
