@@ -62,7 +62,7 @@ Error CertModule::GetCertificate(const Array<uint8_t>& issuer, const Array<uint8
 
         resCert = {};
         for (const auto& item : *certsInStorage) {
-            if (resCert.mNotAfter.IsZero() || item.mNotAfter < resCert.mNotAfter) {
+            if (resCert.mNotAfter.IsZero() || resCert.mNotAfter < item.mNotAfter) {
                 resCert = item;
             }
         }

@@ -369,13 +369,13 @@ TEST_F(IAMTest, GetCertificateEmptySerial)
     ASSERT_TRUE(mStorage.GetCertsInfo("iam", storageCerts).IsNone());
     ASSERT_EQ(storageCerts.Size(), 2);
 
-    // check GetCertificate returns certificate with minimal mNotAfter
+    // check GetCertificate returns certificate with max mNotAfter
     CertInfo certInfo;
 
     const auto empty = Array<uint8_t>(nullptr, 0);
 
     ASSERT_TRUE(mCertHandler->GetCertificate("iam", empty, empty, certInfo).IsNone());
-    ASSERT_EQ(certInfo, storageCerts[0]);
+    ASSERT_EQ(certInfo, storageCerts[1]);
 }
 
 TEST_F(IAMTest, SubscribeCertChanged)
