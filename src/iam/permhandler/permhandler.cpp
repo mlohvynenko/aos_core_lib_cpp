@@ -22,7 +22,7 @@ RetWithError<StaticString<cSecretLen>> PermHandler::RegisterInstance(
 {
     LockGuard lock {mMutex};
 
-    LOG_DBG() << "Register instance: instance = " << instanceIdent;
+    LOG_DBG() << "Register instance: instance=" << instanceIdent;
 
     Error                    err;
     StaticString<cSecretLen> secret;
@@ -46,11 +46,11 @@ Error PermHandler::UnregisterInstance(const InstanceIdent& instanceIdent)
 {
     LockGuard lock {mMutex};
 
-    LOG_DBG() << "Unregister instance: instance = " << instanceIdent;
+    LOG_DBG() << "Unregister instance: instance=" << instanceIdent;
 
     auto result = FindByInstanceIdent(instanceIdent);
     if (!result.mError.IsNone()) {
-        LOG_WRN() << "Unregister instance not registered: instance = " << instanceIdent;
+        LOG_WRN() << "Unregister instance not registered: instance=" << instanceIdent;
 
         return AOS_ERROR_WRAP(result.mError);
     }
@@ -63,7 +63,7 @@ Error PermHandler::GetPermissions(const String& secret, const String& funcServer
 {
     LockGuard lock {mMutex};
 
-    LOG_DBG() << "Get permission: secret = " << secret << ", funcServerID = " << funcServerID;
+    LOG_DBG() << "Get permission: secret=" << secret << ", funcServerID=" << funcServerID;
 
     const auto result = FindBySecret(secret);
     if (!result.mError.IsNone()) {

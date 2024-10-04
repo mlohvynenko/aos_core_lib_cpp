@@ -23,7 +23,7 @@ Error CertHandler::RegisterModule(CertModule& module)
 {
     LockGuard lock {mMutex};
 
-    LOG_INF() << "Register module: type = " << module.GetCertType();
+    LOG_INF() << "Register module: type=" << module.GetCertType();
 
     return AOS_ERROR_WRAP(mModules.PushBack(&module));
 }
@@ -48,7 +48,7 @@ Error CertHandler::SetOwner(const String& certType, const String& password)
 {
     LockGuard lock {mMutex};
 
-    LOG_DBG() << "Set owner: type = " << certType;
+    LOG_DBG() << "Set owner: type=" << certType;
 
     auto* module = FindModule(certType);
     if (module == nullptr) {
@@ -67,7 +67,7 @@ Error CertHandler::Clear(const String& certType)
 {
     LockGuard lock {mMutex};
 
-    LOG_DBG() << "Clear all certificates: type = " << certType;
+    LOG_DBG() << "Clear all certificates: type=" << certType;
 
     auto* module = FindModule(certType);
     if (module == nullptr) {
@@ -87,7 +87,7 @@ Error CertHandler::CreateKey(
 {
     LockGuard lock {mMutex};
 
-    LOG_DBG() << "Create key: type = " << certType << ", subject = " << subjectCommonName;
+    LOG_DBG() << "Create key: type=" << certType << ", subject=" << subjectCommonName;
 
     auto* module = FindModule(certType);
     if (module == nullptr) {
@@ -111,7 +111,7 @@ Error CertHandler::ApplyCertificate(const String& certType, const String& pemCer
 {
     LockGuard lock {mMutex};
 
-    LOG_DBG() << "Apply cert: type = " << certType;
+    LOG_DBG() << "Apply cert: type=" << certType;
 
     auto* module = FindModule(certType);
     if (module == nullptr) {
@@ -138,7 +138,7 @@ Error CertHandler::GetCertificate(
         return AOS_ERROR_WRAP(err);
     }
 
-    LOG_DBG() << "Get certificate: type = " << certType << ", serial = " << serialInHex;
+    LOG_DBG() << "Get certificate: type=" << certType << ", serial=" << serialInHex;
 
     auto* module = FindModule(certType);
     if (module == nullptr) {
@@ -157,7 +157,7 @@ Error CertHandler::SubscribeCertChanged(const String& certType, CertReceiverItf&
 {
     LockGuard lock {mMutex};
 
-    LOG_DBG() << "Subscribe certificate receiver: type = " << certType;
+    LOG_DBG() << "Subscribe certificate receiver: type=" << certType;
 
     auto* module = FindModule(certType);
     if (module == nullptr) {
@@ -198,7 +198,7 @@ Error CertHandler::CreateSelfSignedCert(const String& certType, const String& pa
 {
     LockGuard lock {mMutex};
 
-    LOG_DBG() << "Create self signed cert: type = " << certType;
+    LOG_DBG() << "Create self signed cert: type=" << certType;
 
     auto* module = FindModule(certType);
     if (module == nullptr) {
