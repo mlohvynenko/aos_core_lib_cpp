@@ -271,8 +271,7 @@ public:
     virtual ~CertHandler();
 
 private:
-    // A subscription for grpc client & grpc server of every aos service.
-    static constexpr auto cIAMCertSubsMaxCount = cIAMCertModulesMaxCount * 2;
+    static constexpr auto cIAMCertSubsMaxCount = AOS_CONFIG_CERTHANDLER_CERT_SUBS_MAX_COUNT;
 
     CertModule* FindModule(const String& certType) const;
     Error       UpdateCerts(CertModule& module);
