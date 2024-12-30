@@ -5,7 +5,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-#include "aos/common/cryptoutils.hpp"
+#include "aos/common/crypto/utils.hpp"
 #include "aos/common/tools/fs.hpp"
 #include "aos/common/tools/os.hpp"
 #include "aos/common/tools/uuid.hpp"
@@ -119,7 +119,7 @@ Error PKCS11Module::SetOwner(const String& password)
         soPIN    = password;
     }
 
-    LOG_DBG() << "Init token: slotID = " << mSlotID << ", label = " << mTokenLabel;
+    LOG_DBG() << "Init token: slotID=" << mSlotID << ", label=" << mTokenLabel;
 
     err = mPKCS11->InitToken(mSlotID, soPIN, mTokenLabel);
     if (!err.IsNone()) {
@@ -134,9 +134,9 @@ Error PKCS11Module::SetOwner(const String& password)
     }
 
     if (!mTeeLoginType.IsEmpty()) {
-        LOG_DBG() << "Init PIN: pin = " << userPIN << ", session = " << session->GetHandle();
+        LOG_DBG() << "Init PIN: pin=" << userPIN << ", session=" << session->GetHandle();
     } else {
-        LOG_DBG() << "Init PIN: session = " << session->GetHandle();
+        LOG_DBG() << "Init PIN: session=" << session->GetHandle();
     }
 
     err = session->InitPIN(userPIN);
@@ -179,7 +179,7 @@ Error PKCS11Module::Clear()
             auto destroyErr = session->DestroyObject(object.mHandle);
             if (!destroyErr.IsNone()) {
                 err = AOS_ERROR_WRAP(destroyErr);
-                LOG_ERR() << "Can't delete object: handle = " << object.mHandle;
+                LOG_ERR() << "Can't delete object: handle=" << object.mHandle;
             }
         }
     }
@@ -239,7 +239,7 @@ RetWithError<SharedPtr<crypto::PrivateKeyItf>> PKCS11Module::CreateKey(const Str
     }
 
     if (mPendingKeys.Size() == mPendingKeys.MaxSize()) {
-        LOG_WRN() << "Max pending keys reached: Remove old: certType = " << mCertType;
+        LOG_WRN() << "Max pending keys reached: Remove old: certType=" << mCertType;
 
         auto oldKey = mPendingKeys.Front().mValue.mKey;
 
@@ -248,7 +248,7 @@ RetWithError<SharedPtr<crypto::PrivateKeyItf>> PKCS11Module::CreateKey(const Str
             LOG_ERR() << "Can't delete pending key: err=" << err;
         }
 
-        mPendingKeys.Remove(mPendingKeys.begin());
+        mPendingKeys.Erase(mPendingKeys.begin());
     }
 
     mPendingKeys.PushBack(pendingKey);
@@ -273,7 +273,7 @@ Error PKCS11Module::ApplyCert(const Array<crypto::x509::Certificate>& certChain,
     for (auto it = mPendingKeys.begin(); it != mPendingKeys.end(); ++it) {
         if (CheckCertificate(certChain[0], *it->mKey.GetPrivKey())) {
             curKey.SetValue(*it);
-            mPendingKeys.Remove(it);
+            mPendingKeys.Erase(it);
 
             break;
         }
@@ -299,7 +299,7 @@ Error PKCS11Module::ApplyCert(const Array<crypto::x509::Certificate>& certChain,
     certInfo.mNotAfter = certChain[0].mNotAfter;
     certInfo.mSerial   = certChain[0].mSerial;
 
-    LOG_DBG() << "Certificate applied: cert = " << certInfo;
+    LOG_DBG() << "Certificate applied: cert=" << certInfo;
 
     return ErrorEnum::eNone;
 }
@@ -367,7 +367,7 @@ Error PKCS11Module::ValidateCertificates(
     bool                              isOwned = false;
     SharedPtr<pkcs11::SessionContext> session;
 
-    LOG_DBG() << "Validate certificates: certType = " << mCertType;
+    LOG_DBG() << "Validate certificates: certType=" << mCertType;
 
     Tie(isOwned, err) = IsOwned();
     if (!err.IsNone() || !isOwned) {
@@ -464,7 +464,7 @@ RetWithError<pkcs11::SlotID> PKCS11Module::GetSlotID()
     if (mConfig.mSlotIndex.HasValue()) {
         const auto& slotIndex = mConfig.mSlotIndex.GetValue();
         if (static_cast<size_t>(slotIndex) >= slotList.Size() || slotIndex < 0) {
-            LOG_ERR() << "Invalid slot: index = " << slotIndex;
+            LOG_ERR() << "Invalid slot: index=" << slotIndex;
 
             return {0, AOS_ERROR_WRAP(ErrorEnum::eInvalidArgument)};
         }
@@ -534,21 +534,21 @@ Error PKCS11Module::PrintInfo(pkcs11::SlotID slotID) const
         return AOS_ERROR_WRAP(err);
     }
 
-    LOG_DBG() << "Library = " << mConfig.mLibrary << ", info = " << libInfo;
+    LOG_DBG() << "Library=" << mConfig.mLibrary << ", info=" << libInfo;
 
     err = mPKCS11->GetSlotInfo(slotID, slotInfo);
     if (!err.IsNone()) {
         return AOS_ERROR_WRAP(err);
     }
 
-    LOG_DBG() << "SlotID = " << slotID << ", slotInfo = " << slotInfo;
+    LOG_DBG() << "SlotID=" << slotID << ", slotInfo=" << slotInfo;
 
     err = mPKCS11->GetTokenInfo(slotID, tokenInfo);
     if (!err.IsNone()) {
         return AOS_ERROR_WRAP(err);
     }
 
-    LOG_DBG() << "SlotID = " << slotID << ", tokenInfo = " << tokenInfo;
+    LOG_DBG() << "SlotID=" << slotID << ", tokenInfo=" << tokenInfo;
 
     return ErrorEnum::eNone;
 }
@@ -568,7 +568,7 @@ Error PKCS11Module::GetTeeUserPIN(const String& loginType, uint32_t uid, uint32_
         return GenTeeUserPIN(cLoginTypeGroup, "gid", gid, userPIN);
     }
 
-    LOG_ERR() << "Wrong TEE login: type = " << loginType;
+    LOG_ERR() << "Wrong TEE login: type=" << loginType;
 
     return AOS_ERROR_WRAP(ErrorEnum::eInvalidArgument);
 }
@@ -629,7 +629,7 @@ RetWithError<SharedPtr<pkcs11::SessionContext>> PKCS11Module::CreateSession(bool
         }
     }
 
-    LOG_DBG() << "Create session: session = " << mSession->GetHandle() << ", slotID = " << mSlotID;
+    LOG_DBG() << "Create session: session=" << mSession->GetHandle() << ", slotID=" << mSlotID;
 
     auto sessionInfo = MakeShared<pkcs11::SessionInfo>(&mTmpObjAllocator);
 
@@ -650,13 +650,13 @@ RetWithError<SharedPtr<pkcs11::SessionContext>> PKCS11Module::CreateSession(bool
     }
 
     if (userLogin && !isUserLoggedIn) {
-        LOG_DBG() << "User login: session = " << mSession->GetHandle() << ", slotID = " << mSlotID;
+        LOG_DBG() << "User login: session=" << mSession->GetHandle() << ", slotID=" << mSlotID;
 
         return {mSession, AOS_ERROR_WRAP(mSession->Login(CKU_USER, mUserPIN))};
     }
 
     if (!userLogin && !isSOLoggedIn) {
-        LOG_DBG() << "SO login: session = " << mSession->GetHandle() << ", slotID = " << mSlotID;
+        LOG_DBG() << "SO login: session=" << mSession->GetHandle() << ", slotID=" << mSlotID;
 
         return {mSession, AOS_ERROR_WRAP(mSession->Login(CKU_SO, pin))};
     }
@@ -754,8 +754,8 @@ Error PKCS11Module::TokenMemInfo() const
         return AOS_ERROR_WRAP(err);
     }
 
-    LOG_DBG() << "Token mem info: publicMemory = " << info.mTotalPublicMemory - info.mFreePublicMemory << "/"
-              << info.mTotalPublicMemory << ", privateMemory = " << info.mTotalPrivateMemory - info.mFreePrivateMemory
+    LOG_DBG() << "Token mem info: publicMemory=" << info.mTotalPublicMemory - info.mFreePublicMemory << "/"
+              << info.mTotalPublicMemory << ", privateMemory=" << info.mTotalPrivateMemory - info.mFreePrivateMemory
               << "/" << info.mTotalPrivateMemory;
 
     return ErrorEnum::eNone;
@@ -824,7 +824,7 @@ Error PKCS11Module::CreateURL(const String& label, const Array<uint8_t>& id, Str
     if (!id.IsEmpty()) {
         StaticString<pkcs11::cIDStrLen> idStr;
 
-        auto err = cryptoutils::EncodePKCS11ID(id, idStr);
+        auto err = crypto::EncodePKCS11ID(id, idStr);
         if (!err.IsNone()) {
             return AOS_ERROR_WRAP(err);
         }
@@ -854,7 +854,7 @@ Error PKCS11Module::ParseURL(const String& url, String& label, Array<uint8_t>& i
     StaticString<pkcs11::cLabelLen> token;
     StaticString<pkcs11::cPINLen>   userPIN;
 
-    auto err = cryptoutils::ParsePKCS11URL(url, library, token, label, id, userPIN);
+    auto err = crypto::ParsePKCS11URL(url, library, token, label, id, userPIN);
     if (!err.IsNone()) {
         return AOS_ERROR_WRAP(err);
     }
@@ -866,7 +866,7 @@ Error PKCS11Module::GetValidInfo(const pkcs11::SessionContext& session, Array<Se
     Array<SearchObject>& privKeys, Array<SearchObject>& pubKeys, Array<CertInfo>& resCerts)
 {
     for (auto privKey = privKeys.begin(); privKey != privKeys.end();) {
-        LOG_DBG() << "Private key found: ID = " << uuid::UUIDToString(privKey->mID);
+        LOG_DBG() << "Private key found: ID=" << uuid::UUIDToString(privKey->mID);
 
         auto pubKey = FindObjectByID(pubKeys, privKey->mID);
         if (pubKey == pubKeys.end()) {
@@ -874,7 +874,7 @@ Error PKCS11Module::GetValidInfo(const pkcs11::SessionContext& session, Array<Se
             continue;
         }
 
-        LOG_DBG() << "Public key found: ID = " << uuid::UUIDToString(pubKey->mID);
+        LOG_DBG() << "Public key found: ID=" << uuid::UUIDToString(pubKey->mID);
 
         auto cert = FindObjectByID(certs, privKey->mID);
         if (cert == certs.end()) {
@@ -882,7 +882,7 @@ Error PKCS11Module::GetValidInfo(const pkcs11::SessionContext& session, Array<Se
             continue;
         }
 
-        LOG_DBG() << "Certificate found: ID = " << uuid::UUIDToString(cert->mID);
+        LOG_DBG() << "Certificate found: ID=" << uuid::UUIDToString(cert->mID);
 
         // create certInfo
         auto x509Cert  = MakeUnique<crypto::x509::Certificate>(&mTmpObjAllocator);
@@ -890,7 +890,7 @@ Error PKCS11Module::GetValidInfo(const pkcs11::SessionContext& session, Array<Se
 
         auto err = GetX509Cert(session, cert->mHandle, *x509Cert);
         if (!err.IsNone()) {
-            LOG_ERR() << "Can't get x509 certificate: ID = " << uuid::UUIDToString(cert->mID);
+            LOG_ERR() << "Can't get x509 certificate: ID=" << uuid::UUIDToString(cert->mID);
             return err;
         }
 
@@ -905,22 +905,9 @@ Error PKCS11Module::GetValidInfo(const pkcs11::SessionContext& session, Array<Se
             return AOS_ERROR_WRAP(err);
         }
 
-        auto ret = certs.Remove(cert);
-        if (!ret.mError.IsNone()) {
-            return AOS_ERROR_WRAP(ret.mError);
-        }
-
-        ret = pubKeys.Remove(pubKey);
-        if (!ret.mError.IsNone()) {
-            return AOS_ERROR_WRAP(ret.mError);
-        }
-
-        ret = privKeys.Remove(privKey);
-        if (!ret.mError.IsNone()) {
-            return AOS_ERROR_WRAP(ret.mError);
-        }
-
-        privKey = ret.mValue;
+        certs.Erase(cert);
+        pubKeys.Erase(pubKey);
+        privKey = privKeys.Erase(privKey);
     }
 
     return ErrorEnum::eNone;
@@ -1005,8 +992,8 @@ Error PKCS11Module::CreateInvalidURLs(const Array<SearchObject>& objects, Array<
 void PKCS11Module::PrintInvalidObjects(const String& objectType, const Array<SearchObject>& objects)
 {
     for (const auto& object : objects) {
-        LOG_WRN() << "Invalid " << objectType << " found: certType = " << mCertType
-                  << ", id = " << uuid::UUIDToString(object.mID);
+        LOG_WRN() << "Invalid " << objectType << " found: certType=" << mCertType
+                  << ", id=" << uuid::UUIDToString(object.mID);
     }
 }
 

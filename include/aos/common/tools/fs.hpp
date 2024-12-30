@@ -14,6 +14,7 @@
 #include <unistd.h>
 
 #include "aos/common/tools/config.hpp"
+#include "aos/common/tools/memory.hpp"
 #include "aos/common/tools/string.hpp"
 
 namespace aos {
@@ -31,26 +32,10 @@ public:
     /**
      * Appends path to string.
      */
-    template <typename T>
-    static String& AppendPath(String& path, T& item)
+    template <typename... Args>
+    static String& AppendPath(String& path, Args... args)
     {
-        if (path.Size() == 0 || *(path.end() - 1) == '/') {
-            path.Append(item);
-        } else {
-            path.Append("/").Append(item);
-        }
-
-        return path;
-    }
-
-    /**
-     * Appends path to string.
-     */
-    template <typename T, typename... Args>
-    static String& AppendPath(String& path, T& item, Args... args)
-    {
-        AppendPath(path, item);
-        AppendPath(path, args...);
+        (AppendPathEntry(path, args), ...);
 
         return path;
     }
@@ -58,23 +43,10 @@ public:
     /**
      * Joins path items.
      */
-    template <typename T, typename... Args>
-    static StaticString<cFilePathLen> JoinPath(T& first, Args... args)
+    template <typename... Args>
+    static StaticString<cFilePathLen> JoinPath(Args... args)
     {
-        StaticString<cFilePathLen> path = first;
-
-        AppendPath(path, args...);
-
-        return path;
-    }
-
-    /**
-     * Joins path items.
-     */
-    template <typename T, typename... Args>
-    static StaticString<cFilePathLen> JoinPath(T* first, Args... args)
-    {
-        StaticString<cFilePathLen> path = first;
+        StaticString<cFilePathLen> path;
 
         AppendPath(path, args...);
 
@@ -225,7 +197,7 @@ public:
 
             auto ret = unlink(entryPath.CStr());
             if (ret != 0) {
-                if (errno != ENOTEMPTY) {
+                if (errno != ENOTEMPTY && errno != EACCES) {
                     return errno;
                 }
 
@@ -264,6 +236,12 @@ public:
         return ErrorEnum::eNone;
     }
 
+    /**
+     * Removes file or directory which must be empty.
+     *
+     * @param path path to file or directory
+     * @return Error
+     */
     static Error Remove(const String& path)
     {
 #if defined(__ZEPHYR__) && defined(CONFIG_POSIX_API)
@@ -297,6 +275,12 @@ public:
         return ErrorEnum::eNone;
     }
 
+    /**
+     * Removes file or directory.
+     *
+     * @param path path to file or directory
+     * @return Error
+     */
     static Error RemoveAll(const String& path)
     {
 #if defined(__ZEPHYR__) && defined(CONFIG_POSIX_API)
@@ -306,7 +290,7 @@ public:
                 return ErrorEnum::eNone;
             }
 
-            if (errno != ENOTEMPTY) {
+            if (errno != ENOTEMPTY && errno != EACCES) {
                 return errno;
             }
 
@@ -364,22 +348,16 @@ public:
             return Error(errno);
         }
 
-        auto OnError = [fd]() {
-            auto err = errno;
-
-            close(fd);
-
-            return Error(err);
-        };
+        auto closeFile = DeferRelease(&fd, [](const int* fd) { close(*fd); });
 
         auto size = lseek(fd, 0, SEEK_END);
         if (size < 0) {
-            return OnError();
+            return errno;
         }
 
         auto pos = lseek(fd, 0, SEEK_SET);
         if (pos < 0) {
-            return OnError();
+            return errno;
         }
 
         auto err = buff.Resize(size);
@@ -390,14 +368,14 @@ public:
         while (pos < size) {
             auto count = read(fd, buff.Get() + pos, buff.Size() - pos);
             if (count < 0) {
-                return OnError();
+                return errno;
             }
 
             pos += count;
         }
 
         if (close(fd) != 0) {
-            return Error(errno);
+            return errno;
         }
 
         return ErrorEnum::eNone;
@@ -463,6 +441,13 @@ public:
             return Error(errno);
         }
 
+// Zephyr doesn't implement chmod
+#ifndef __ZEPHYR__
+        if (chmod(fileName.CStr(), perm) != 0) {
+            return Error(errno);
+        }
+#endif
+
         return ErrorEnum::eNone;
     }
 
@@ -479,6 +464,18 @@ public:
         const auto buff = Array<uint8_t>(reinterpret_cast<const uint8_t*>(text.Get()), text.Size());
 
         return WriteFile(fileName, buff, perm);
+    }
+
+private:
+    static String& AppendPathEntry(String& path, const String& item)
+    {
+        if (path.Size() == 0 || *(path.end() - 1) == '/') {
+            path.Append(item);
+        } else {
+            path.Append("/").Append(item);
+        }
+
+        return path;
     }
 };
 

@@ -53,7 +53,7 @@ Error ServiceManager::InstallServices(const Array<ServiceInfo>& services)
 
     for (const auto& service : *installedServices) {
         if (!services
-                 .Find([&service](const ServiceInfo& info) {
+                 .FindIf([&service](const ServiceInfo& info) {
                      return service.mServiceID == info.mServiceID && service.mVersion == info.mVersion;
                  })
                  .mError.IsNone()) {
@@ -82,7 +82,7 @@ Error ServiceManager::InstallServices(const Array<ServiceInfo>& services)
 
     for (const auto& info : services) {
         if (!installedServices
-                 ->Find([&info](const ServiceData& service) { return info.mServiceID == service.mServiceID; })
+                 ->FindIf([&info](const ServiceData& service) { return info.mServiceID == service.mServiceID; })
                  .mError.IsNone()) {
             err = mInstallPool.AddTask([this, &info](void*) {
                 auto err = InstallService(info);
@@ -165,12 +165,12 @@ Error ServiceManager::RemoveService(const ServiceData& service)
 
     auto err = FS::RemoveAll(service.mImagePath);
     if (!err.IsNone() && removeErr.IsNone()) {
-        removeErr = err;
+        removeErr = AOS_ERROR_WRAP(err);
     }
 
     err = mStorage->RemoveService(service.mServiceID, service.mVersion);
     if (!err.IsNone() && removeErr.IsNone()) {
-        removeErr = err;
+        removeErr = AOS_ERROR_WRAP(err);
     }
 
     return removeErr;
@@ -178,25 +178,25 @@ Error ServiceManager::RemoveService(const ServiceData& service)
 
 Error ServiceManager::InstallService(const ServiceInfo& service)
 {
-    ServiceData data {
-        service.mServiceID, service.mProviderID, service.mVersion, FS::JoinPath(cServicesDir, service.mServiceID)};
+    ServiceData data {service.mServiceID, service.mProviderID, service.mVersion,
+        FS::JoinPath(cServicesDir, service.mServiceID), "", Time::Now(), false, service.mSize, service.mGID};
 
     LOG_INF() << "Install service: serviceID=" << data.mServiceID << ", providerID=" << data.mProviderID
               << ", version=" << data.mVersion << ", path=" << data.mImagePath;
 
     auto err = FS::ClearDir(data.mImagePath);
     if (!err.IsNone()) {
-        return err;
+        return AOS_ERROR_WRAP(err);
     }
 
     err = mDownloader->Download(service.mURL, data.mImagePath, DownloadContentEnum::eService);
     if (!err.IsNone()) {
-        return err;
+        return AOS_ERROR_WRAP(err);
     }
 
     err = mStorage->AddService(data);
     if (!err.IsNone()) {
-        return err;
+        return AOS_ERROR_WRAP(err);
     }
 
     return ErrorEnum::eNone;

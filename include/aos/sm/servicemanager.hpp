@@ -49,6 +49,31 @@ struct ServiceData {
     StaticString<cFilePathLen> mImagePath;
 
     /**
+     * Manifest digest.
+     */
+    StaticString<oci::cMaxDigestLen> mManifestDigest;
+
+    /**
+     * Timestamp.
+     */
+    Time mTimestamp;
+
+    /**
+     * Cached flag.
+     */
+    bool mCached;
+
+    /**
+     * Service size.
+     */
+    uint64_t mSize;
+
+    /**
+     * Service group identifier.
+     */
+    uint32_t mGID;
+
+    /**
      * Compares service data.
      *
      * @param data data to compare.
@@ -56,8 +81,9 @@ struct ServiceData {
      */
     bool operator==(const ServiceData& data) const
     {
-        return data.mServiceID == mServiceID && data.mProviderID == mProviderID && data.mVersion == mVersion
-            && data.mImagePath == mImagePath;
+        return mServiceID == data.mServiceID && mProviderID == data.mProviderID && mVersion == data.mVersion
+            && mImagePath == data.mImagePath && data.mManifestDigest == mManifestDigest && mCached == data.mCached
+            && mSize == data.mSize && mGID == data.mGID;
     }
 
     /**

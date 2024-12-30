@@ -17,8 +17,8 @@
 #include "aos/common/tools/log.hpp"
 #include "aos/sm/launcher.hpp"
 
-#include "log.hpp"
-#include "utils.hpp"
+#include "aos/test/log.hpp"
+#include "aos/test/utils.hpp"
 
 using namespace aos::sm::runner;
 using namespace aos::sm::servicemanager;
@@ -97,7 +97,7 @@ public:
         std::transform(
             services.begin(), services.end(), std::back_inserter(mServicesData), [](const ServiceInfo& service) {
                 return ServiceData {service.mServiceID, service.mProviderID, service.mVersion,
-                    FS::JoinPath("/aos/storages", service.mServiceID)};
+                    FS::JoinPath("/aos/storages", service.mServiceID), "", Time::Now(), false, 0, 0};
             });
 
         return ErrorEnum::eNone;
@@ -309,9 +309,63 @@ public:
         return ErrorEnum::eNone;
     }
 
+    RetWithError<uint64_t> GetOperationVersion() const override
+    {
+        std::lock_guard lock {mMutex};
+
+        return {mOperationVersion, ErrorEnum::eNone};
+    }
+
+    Error SetOperationVersion(uint64_t version) override
+    {
+        std::lock_guard lock {mMutex};
+
+        mOperationVersion = version;
+
+        return ErrorEnum::eNone;
+    }
+
+    Error GetOverrideEnvVars(cloudprotocol::EnvVarsInstanceInfoArray& envVarsInstanceInfos) const override
+    {
+        std::lock_guard lock {mMutex};
+
+        envVarsInstanceInfos = mEnvVarsInstanceInfos;
+
+        return ErrorEnum::eNone;
+    }
+
+    Error SetOverrideEnvVars(const cloudprotocol::EnvVarsInstanceInfoArray& envVarsInstanceInfos) override
+    {
+        std::lock_guard lock {mMutex};
+
+        mEnvVarsInstanceInfos = envVarsInstanceInfos;
+
+        return ErrorEnum::eNone;
+    }
+
+    RetWithError<Time> GetOnlineTime() const override
+    {
+        std::lock_guard lock {mMutex};
+
+        return {mOnlineTime, ErrorEnum::eNone};
+    }
+
+    Error SetOnlineTime(const Time& time) override
+    {
+        std::lock_guard lock {mMutex};
+
+        mOnlineTime = time;
+
+        return ErrorEnum::eNone;
+    }
+
 private:
     std::vector<InstanceInfo> mInstances;
-    std::mutex                mMutex;
+    mutable std::mutex        mMutex;
+
+    uint64_t                                mOperationVersion = launcher::Launcher::cOperationVersion;
+    cloudprotocol::EnvVarsInstanceInfoArray mEnvVarsInstanceInfos;
+    Time                                    mOnlineTime = Time::Now();
 };
 
 /**
@@ -376,6 +430,8 @@ TEST(LauncherTest, RunInstances)
         launcher.Init(serviceManager, runner, ociManager, statusReceiver, storage, resourceMonitor, connectionPublisher)
             .IsNone());
 
+    ASSERT_TRUE(launcher.Start().IsNone());
+
     connectionPublisher.Connect();
 
     // Wait for initial instance status
@@ -396,9 +452,9 @@ TEST(LauncherTest, RunInstances)
         // Run instances first time
         {
             std::vector<InstanceInfo> {
-                {{"service1", "subject1", 0}, 0, 0, "", ""},
-                {{"service1", "subject1", 1}, 0, 0, "", ""},
-                {{"service1", "subject1", 2}, 0, 0, "", ""},
+                {{"service1", "subject1", 0}, {}, 0, 0, "", ""},
+                {{"service1", "subject1", 1}, {}, 0, 0, "", ""},
+                {{"service1", "subject1", 2}, {}, 0, 0, "", ""},
             },
             std::vector<ServiceInfo> {
                 {"service1", "provider1", "1.0.0", 0, "", {}, 0},
@@ -420,9 +476,9 @@ TEST(LauncherTest, RunInstances)
         // Another instances round
         {
             std::vector<InstanceInfo> {
-                {{"service1", "subject1", 4}, 0, 0, "", ""},
-                {{"service1", "subject1", 5}, 0, 0, "", ""},
-                {{"service1", "subject1", 6}, 0, 0, "", ""},
+                {{"service1", "subject1", 4}, {}, 0, 0, "", ""},
+                {{"service1", "subject1", 5}, {}, 0, 0, "", ""},
+                {{"service1", "subject1", 6}, {}, 0, 0, "", ""},
             },
             std::vector<ServiceInfo> {
                 {"service1", "provider1", "2.0.0", 0, "", {}, 0},
@@ -463,6 +519,8 @@ TEST(LauncherTest, RunInstances)
     EXPECT_EQ(feature.wait_for(cWaitStatusTimeout), std::future_status::ready);
     EXPECT_TRUE(TestUtils::CompareArrays(
         feature.get(), Array<InstanceStatus>(testData.back().mStatus.data(), testData.back().mStatus.size())));
+
+    EXPECT_TRUE(launcher.Stop().IsNone());
 }
 
 } // namespace launcher

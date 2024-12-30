@@ -20,9 +20,9 @@ namespace permhandler {
 RetWithError<StaticString<cSecretLen>> PermHandler::RegisterInstance(
     const InstanceIdent& instanceIdent, const Array<FunctionalServicePermissions>& instancePermissions)
 {
-    LockGuard lock(mMutex);
+    LockGuard lock {mMutex};
 
-    LOG_DBG() << "Register instance: instance = " << instanceIdent;
+    LOG_DBG() << "Register instance: instance=" << instanceIdent;
 
     Error                    err;
     StaticString<cSecretLen> secret;
@@ -44,26 +44,24 @@ RetWithError<StaticString<cSecretLen>> PermHandler::RegisterInstance(
 
 Error PermHandler::UnregisterInstance(const InstanceIdent& instanceIdent)
 {
-    LockGuard lock(mMutex);
+    LockGuard lock {mMutex};
 
-    LOG_DBG() << "Unregister instance: instance = " << instanceIdent;
+    LOG_DBG() << "Unregister instance: instance=" << instanceIdent;
 
-    auto result = FindByInstanceIdent(instanceIdent);
-    if (!result.mError.IsNone()) {
-        LOG_WRN() << "Unregister instance not registered: instance = " << instanceIdent;
-
-        return AOS_ERROR_WRAP(result.mError);
+    if (mInstancesPerms.RemoveIf([&instanceIdent](const auto& item) { return instanceIdent == item.mInstanceIdent; })
+        == 0) {
+        return AOS_ERROR_WRAP(ErrorEnum::eNotFound);
     }
 
-    return AOS_ERROR_WRAP(mInstancesPerms.Remove(result.mValue).mError);
+    return ErrorEnum::eNone;
 }
 
 Error PermHandler::GetPermissions(const String& secret, const String& funcServerID, InstanceIdent& instanceIdent,
     Array<PermKeyValue>& servicePermissions)
 {
-    LockGuard lock(mMutex);
+    LockGuard lock {mMutex};
 
-    LOG_DBG() << "Get permission: secret = " << secret << ", funcServerID = " << funcServerID;
+    LOG_DBG() << "Get permission: secret=" << secret << ", funcServerID=" << funcServerID;
 
     const auto result = FindBySecret(secret);
     if (!result.mError.IsNone()) {
@@ -104,12 +102,12 @@ Error PermHandler::AddSecret(const String& secret, const InstanceIdent& instance
 
 RetWithError<InstancePermissions*> PermHandler::FindBySecret(const String& secret)
 {
-    return mInstancesPerms.Find([&secret](const auto& item) { return secret == item.mSecret; });
+    return mInstancesPerms.FindIf([&secret](const auto& item) { return secret == item.mSecret; });
 }
 
 RetWithError<InstancePermissions*> PermHandler::FindByInstanceIdent(const InstanceIdent& instanceIdent)
 {
-    return mInstancesPerms.Find([&instanceIdent](const auto& elem) { return instanceIdent == elem.mInstanceIdent; });
+    return mInstancesPerms.FindIf([&instanceIdent](const auto& elem) { return instanceIdent == elem.mInstanceIdent; });
 }
 
 StaticString<cSecretLen> PermHandler::GenerateSecret()

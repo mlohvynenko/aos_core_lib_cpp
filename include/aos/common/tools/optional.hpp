@@ -8,6 +8,9 @@
 #ifndef AOS_OPTIONAL_HPP_
 #define AOS_OPTIONAL_HPP_
 
+#include <assert.h>
+#include <cstdint>
+
 namespace aos {
 
 /**
@@ -128,6 +131,33 @@ public:
         }
         mHasValue = false;
     }
+
+    /**
+     * Compares optional instances.
+     *
+     * @param other instance to compare with.
+     * @return bool.
+     */
+    bool operator==(const Optional& other) const
+    {
+        if (!HasValue() && !other.HasValue()) {
+            return true;
+        }
+
+        if (HasValue() != other.HasValue()) {
+            return false;
+        }
+
+        return GetValue() == other.GetValue();
+    }
+
+    /**
+     * Compares optional instances.
+     *
+     * @param other instance to compare with.
+     * @return bool.
+     */
+    bool operator!=(const Optional& other) const { return !operator==(other); }
 
     /**
      * Destroys optional instance.

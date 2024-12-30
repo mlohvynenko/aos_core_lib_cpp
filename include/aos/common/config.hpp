@@ -9,6 +9,34 @@
 #define AOS_COMMON_CONFIG_HPP_
 
 /**
+ * Max error message len.
+ */
+#ifndef AOS_CONFIG_TOOLS_ERROR_MESSAGE_LEN
+#define AOS_CONFIG_TOOLS_ERROR_MESSAGE_LEN 64
+#endif
+
+/**
+ * Max error print message len.
+ */
+#ifndef AOS_CONFIG_TOOLS_ERROR_STR_LEN
+#define AOS_CONFIG_TOOLS_ERROR_STR_LEN 128
+#endif
+
+/**
+ *  UUID size.
+ */
+#ifndef AOS_CONFIG_TOOLS_UUID_SIZE
+#define AOS_CONFIG_TOOLS_UUID_SIZE 16
+#endif
+
+/**
+ *  Length of UUID string representation.
+ */
+#ifndef AOS_CONFIG_TOOLS_UUID_LEN
+#define AOS_CONFIG_TOOLS_UUID_LEN AOS_CONFIG_TOOLS_UUID_SIZE * 2 + 4 + 1 // 32 hex digits + 4 '-' symbols + '\0'
+#endif
+
+/**
  * Service provider ID len.
  */
 #ifndef AOS_CONFIG_TYPES_PROVIDER_ID_LEN
@@ -149,6 +177,41 @@
 #endif
 
 /**
+ * Port len.
+ */
+#ifndef AOS_CONFIG_TYPES_PORT_LEN
+#define AOS_CONFIG_TYPES_PORT_LEN 8
+#endif
+
+/**
+ * Protocol name len.
+ */
+#ifndef AOS_CONFIG_TYPES_PROTOCOL_NAME_LEN
+#define AOS_CONFIG_TYPES_PROTOCOL_NAME_LEN 16
+#endif
+
+/**
+ * Max number of DNS servers.
+ */
+#ifndef AOS_CONFIG_TYPES_MAX_NUM_DNS_SERVERS
+#define AOS_CONFIG_TYPES_MAX_NUM_DNS_SERVERS 4
+#endif
+
+/**
+ * Max number of firewall rules.
+ */
+#ifndef AOS_CONFIG_TYPES_MAX_NUM_FIREWALL_RULES
+#define AOS_CONFIG_TYPES_MAX_NUM_FIREWALL_RULES 10
+#endif
+
+/**
+ * Max number of networks.
+ */
+#ifndef AOS_CONFIG_TYPES_MAX_NUM_NETWORKS
+#define AOS_CONFIG_TYPES_MAX_NUM_NETWORKS 4
+#endif
+
+/**
  * Host name len.
  */
 #ifndef AOS_CONFIG_TYPES_HOST_NAME_LEN
@@ -278,7 +341,7 @@
  * Max number of nodes.
  */
 #ifndef AOS_CONFIG_TYPES_MAX_NUM_NODES
-#define AOS_CONFIG_TYPES_MAX_NUM_NODES 4
+#define AOS_CONFIG_TYPES_MAX_NUM_NODES 16
 #endif
 
 /**
@@ -558,6 +621,48 @@
 #endif
 
 /**
+ * Number of certificate chains to be stored in crypto::CertLoader.
+ */
+#ifndef AOS_CONFIG_CRYPTO_CERTIFICATE_CHAINS_COUNT
+#define AOS_CONFIG_CRYPTO_CERTIFICATE_CHAINS_COUNT 8
+#endif
+
+/**
+ * Number of private keys to be stored in crypto::CertLoader.
+ */
+#ifndef AOS_CONFIG_CRYPTO_KEYS_COUNT
+#define AOS_CONFIG_CRYPTO_KEYS_COUNT 8
+#endif
+
+/**
+ * Max number of crypto allocations.
+ */
+#ifndef AOS_CONFIG_CRYPTO_NUM_ALLOCATIONS
+#define AOS_CONFIG_CRYPTO_NUM_ALLOCATIONS 16
+#endif
+
+/**
+ * Default PKCS11 library.
+ */
+#ifndef AOS_CONFIG_CRYPTO_DEFAULT_PKCS11_LIB
+#define AOS_CONFIG_CRYPTO_DEFAULT_PKCS11_LIB "/usr/lib/softhsm/libsofthsm2.so"
+#endif
+
+/**
+ * Use PKCS11 OS locking mechanism.
+ */
+#ifndef AOS_CONFIG_CRYPTO_PKCS11_OS_LOCKING
+#define AOS_CONFIG_CRYPTO_PKCS11_OS_LOCKING 1
+#endif
+
+/**
+ * Maximum number of public keys to be allocated by cryptoprovider simultaneously.
+ */
+#ifndef AOS_CONFIG_CRYPTO_PUB_KEYS_COUNT
+#define AOS_CONFIG_CRYPTO_PUB_KEYS_COUNT 8
+#endif
+
+/**
  * Maximum length of PKCS11 slot description.
  */
 #ifndef AOS_CONFIG_PKCS11_SLOT_DESCRIPTION_LEN
@@ -663,62 +768,6 @@
 #endif
 
 /**
- *  UUID size.
- */
-#ifndef AOS_CONFIG_UUID_SIZE
-#define AOS_CONFIG_UUID_SIZE 16
-#endif
-
-/**
- *  Length of UUID string representation.
- */
-#ifndef AOS_CONFIG_UUID_LEN
-#define AOS_CONFIG_UUID_LEN AOS_CONFIG_UUID_SIZE * 2 + 4 + 1 // 32 hex digits + 4 '-' symbols + '\0'
-#endif
-
-/**
- * Number of certificate chains to be stored in cryptoutils::CertLoader.
- */
-#ifndef AOS_CONFIG_CRYPTOUTILS_CERTIFICATE_CHAINS_COUNT
-#define AOS_CONFIG_CRYPTOUTILS_CERTIFICATE_CHAINS_COUNT 5
-#endif
-
-/**
- * Number of private keys to be stored in cryptoutils::CertLoader.
- */
-#ifndef AOS_CONFIG_CRYPTOUTILS_KEYS_COUNT
-#define AOS_CONFIG_CRYPTOUTILS_KEYS_COUNT 5
-#endif
-
-/**
- * Max number of cryptoutils allocations.
- */
-#ifndef AOS_CONFIG_CRYPTOUTILS_NUM_ALLOCATIONS
-#define AOS_CONFIG_CRYPTOUTILS_NUM_ALLOCATIONS 16
-#endif
-
-/**
- * Default PKCS11 library.
- */
-#ifndef AOS_CONFIG_CRYPTOUTILS_DEFAULT_PKCS11_LIB
-#define AOS_CONFIG_CRYPTOUTILS_DEFAULT_PKCS11_LIB "/usr/lib/softhsm/libsofthsm2.so"
-#endif
-
-/**
- * Use PKCS11 OS locking mechanism.
- */
-#ifndef AOS_CONFIG_CRYPTOUTILS_PKCS11_OS_LOCKING
-#define AOS_CONFIG_CRYPTOUTILS_PKCS11_OS_LOCKING 1
-#endif
-
-/**
- * Maximum number of public keys to be allocated by cryptoprovider simultaneously.
- */
-#ifndef AOS_CONFIG_CRYPTOPROVIDER_PUB_KEYS_COUNT
-#define AOS_CONFIG_CRYPTOPROVIDER_PUB_KEYS_COUNT 5
-#endif
-
-/**
  * Max media type len.
  */
 #ifndef AOS_CONFIG_OCISPEC_MEDIA_TYPE_LEN
@@ -768,24 +817,66 @@
 #endif
 
 /**
- * Node config JSON length.
+ * Alert message len.
  */
-#ifndef AOS_CONFIG_NODE_CONFIG_JSON_LEN
-#define AOS_CONFIG_NODE_CONFIG_JSON_LEN 4096
+#ifndef AOS_CONFIG_CLOUD_PROTOCOL_ALERT_MESSAGE_LEN
+#define AOS_CONFIG_CLOUD_PROTOCOL_ALERT_MESSAGE_LEN 128
 #endif
 
 /**
- * Max error message len.
+ * Alert download target id len.
  */
-#ifndef AOS_CONFIG_ERROR_MESSAGE_LEN
-#define AOS_CONFIG_ERROR_MESSAGE_LEN 64
+#ifndef AOS_CONFIG_CLOUD_PROTOCOL_ALERT_CORE_DOWNLOAD_TARGET_ID_LEN
+#define AOS_CONFIG_CLOUD_PROTOCOL_ALERT_CORE_DOWNLOAD_TARGET_ID_LEN 64
 #endif
 
 /**
- * Max error print message len.
+ * Alert download progress len.
  */
-#ifndef AOS_CONFIG_ERROR_STR_LEN
-#define AOS_CONFIG_ERROR_STR_LEN 128
+#ifndef AOS_CONFIG_CLOUD_PROTOCOL_ALERT_DOWNLOAD_PROGRESS_LEN
+#define AOS_CONFIG_CLOUD_PROTOCOL_ALERT_DOWNLOAD_PROGRESS_LEN 64
+#endif
+
+/**
+ * Alert parameter len.
+ */
+#ifndef AOS_CONFIG_CLOUD_PROTOCOL_ALERT_PARAMETER_LEN
+#define AOS_CONFIG_CLOUD_PROTOCOL_ALERT_PARAMETER_LEN 16
+#endif
+
+/**
+ * Resource alert errors size.
+ */
+#ifndef AOS_CONFIG_CLOUD_PROTOCOL_ALERT_RESOURCE_ERRORS_SIZE
+#define AOS_CONFIG_CLOUD_PROTOCOL_ALERT_RESOURCE_ERRORS_SIZE 4
+#endif
+
+/**
+ * Environment variable name value.
+ */
+#ifndef AOS_CONFIG_CLOUD_PROTOCOL_ENV_VAR_VALUE_LEN
+#define AOS_CONFIG_CLOUD_PROTOCOL_ENV_VAR_VALUE_LEN 32
+#endif
+
+/**
+ * Log id len.
+ */
+#ifndef AOS_CONFIG_CLOUD_PROTOCOL_LOG_ID_LEN
+#define AOS_CONFIG_CLOUD_PROTOCOL_LOG_ID_LEN 64
+#endif
+
+/**
+ * Log content len.
+ */
+#ifndef AOS_CONFIG_CLOUD_PROTOCOL_LOG_CONTENT_LEN
+#define AOS_CONFIG_CLOUD_PROTOCOL_LOG_CONTENT_LEN 256
+#endif
+
+/**
+ * Bearer token len.
+ */
+#ifndef AOS_CONFIG_CLOUD_PROTOCOL_BEARER_TOKEN_LEN
+#define AOS_CONFIG_CLOUD_PROTOCOL_BEARER_TOKEN_LEN 256
 #endif
 
 #endif

@@ -625,13 +625,12 @@ public:
     }
 
     /**
-     * Assigns static string from another static string.
+     * Assigns string from another static string.
      *
-     * @param str string to create from.
+     * @param str string to assign from.
      */
     StaticString& operator=(const StaticString& str)
     {
-        String::SetBuffer(mBuffer, cMaxSize);
         String::operator=(str);
 
         return *this;
@@ -647,6 +646,18 @@ public:
     {
         String::SetBuffer(mBuffer, cMaxSize);
         String::operator=(str);
+    }
+
+    /**
+     * Assigns string from another  string.
+     *
+     * @param str string to assign from.
+     */
+    StaticString& operator=(const String& str)
+    {
+        String::operator=(str);
+
+        return *this;
     }
 
     // cppcheck-suppress noExplicitConstructor
@@ -676,91 +687,6 @@ public:
 
 private:
     StaticBuffer<cMaxSize + 1> mBuffer;
-};
-
-/**
- * Dynamic string instance.
- *
- * @tparam cMaxSize max dynamic string size.
- */
-template <size_t cMaxSize>
-class DynamicString : public String {
-public:
-    /**
-     * Create dynamic string.
-     */
-    DynamicString()
-        : mBuffer(cMaxSize * +1)
-    {
-        *(static_cast<char*>(mBuffer.Get()))            = 0;
-        *(static_cast<char*>(mBuffer.Get()) + cMaxSize) = 0;
-        String::SetBuffer(mBuffer, cMaxSize);
-    }
-
-    /**
-     * Creates dynamic string from another dynamic string.
-     *
-     * @param str string to create from.
-     */
-    DynamicString(const DynamicString& str)
-        : String()
-    {
-        String::SetBuffer(mBuffer, cMaxSize);
-        String::operator=(str);
-    }
-
-    /**
-     * Assigns dynamic string from another dynamic string.
-     *
-     * @param str string to create from.
-     */
-    DynamicString& operator=(const DynamicString& str)
-    {
-        String::SetBuffer(mBuffer, cMaxSize);
-        String::operator=(str);
-
-        return *this;
-    }
-
-    // cppcheck-suppress noExplicitConstructor
-    /**
-     * Creates dynamic string from another string.
-     *
-     * @param str initial value.
-     */
-    DynamicString(const String& str)
-    {
-        String::SetBuffer(mBuffer, cMaxSize);
-        String::operator=(str);
-    }
-
-    // cppcheck-suppress noExplicitConstructor
-    /**
-     * Creates dynamic string from C string.
-     *
-     * @param str initial value.
-     */
-    DynamicString(const char* str)
-    {
-        String::SetBuffer(mBuffer, cMaxSize);
-        String::operator=(str);
-    }
-
-    /**
-     * Assigns C string to dynamic string.
-     *
-     * @param str C string.
-     * @return DynamicString&.
-     */
-    DynamicString& operator=(const char* str)
-    {
-        String::operator=(str);
-
-        return *this;
-    }
-
-private:
-    DynamicBuffer mBuffer;
 };
 
 /**

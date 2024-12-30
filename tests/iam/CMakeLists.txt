@@ -13,6 +13,7 @@ set(TARGET aosiamcpp_test)
 
 set(SOURCES
     iam_test.cpp
+    certmodules/certmodules_test.cpp
     stubs/storagestub.cpp
     identmodules/fileidentifier_test.cpp
     nodeinfoprovider/nodeinfoprovider_test.cpp
@@ -26,7 +27,7 @@ set(SOURCES
 # ######################################################################################################################
 
 add_executable(${TARGET} ${SOURCES})
-target_link_libraries(${TARGET} aosiamcpp aoscommoncpp testutils GTest::gmock_main)
-target_include_directories(${TARGET} PRIVATE ../include)
+target_link_libraries(${TARGET} aosiam aoscommon testutils GTest::gmock_main)
+target_include_directories(${TARGET} PRIVATE ../include stubs)
 
 gtest_discover_tests(${TARGET})

@@ -2,3 +2,4 @@ useStlAlgorithm
 unusedFunction
 toomanyconfigs
 missingInclude
+*:./src/common/crypto/mbedtls/drivers/*

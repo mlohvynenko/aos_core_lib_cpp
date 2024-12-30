@@ -8,12 +8,12 @@
 #include <gtest/gtest.h>
 
 #include "aos/common/crypto/mbedtls/cryptoprovider.hpp"
-#include "aos/common/cryptoutils.hpp"
-#include "log.hpp"
-#include "softhsmenv.hpp"
+#include "aos/common/crypto/utils.hpp"
+#include "aos/test/log.hpp"
+#include "aos/test/softhsmenv.hpp"
 
 namespace aos {
-namespace cryptoutils {
+namespace crypto {
 
 /***********************************************************************************************************************
  * Suite
@@ -85,7 +85,7 @@ protected:
 
     pkcs11::SlotID                    mSlotID = 0;
     SharedPtr<pkcs11::LibraryContext> mLibrary;
-    cryptoutils::CertLoader           mCertLoader;
+    crypto::CertLoader                mCertLoader;
 
     StaticAllocator<Max(2 * sizeof(pkcs11::PKCS11RSAPrivateKey), sizeof(pkcs11::PKCS11ECDSAPrivateKey),
         2 * sizeof(crypto::x509::Certificate) + sizeof(crypto::x509::CertificateChain)
@@ -281,5 +281,5 @@ TEST_F(CryptoutilsTest, FindCertificatesFromFile)
     EXPECT_EQ(std::string(issuer.CStr()), std::string("CN=Aos Cloud"));
 }
 
-} // namespace cryptoutils
+} // namespace crypto
 } // namespace aos

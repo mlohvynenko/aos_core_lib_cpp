@@ -83,7 +83,7 @@ public:
      *
      * @returns RetWithError<CertTypes>.
      */
-    virtual RetWithError<CertTypes> GetCertTypes() = 0;
+    virtual RetWithError<CertTypes> GetCertTypes() const = 0;
 
     /**
      * Creates key.
@@ -116,8 +116,25 @@ public:
      * @returns Error.
      */
     virtual Error GetCert(const String& certType, const Array<uint8_t>& issuer, const Array<uint8_t>& serial,
-        certhandler::CertInfo& resCert)
+        certhandler::CertInfo& resCert) const
         = 0;
+
+    /**
+     * Subscribes certificates receiver.
+     *
+     * @param certType certificate type.
+     * @param certReceiver certificate receiver.
+     * @returns Error.
+     */
+    virtual Error SubscribeCertChanged(const String& certType, certhandler::CertReceiverItf& certReceiver) = 0;
+
+    /**
+     * Unsubscribes certificate receiver.
+     *
+     * @param certReceiver certificate receiver.
+     * @returns Error.
+     */
+    virtual Error UnsubscribeCertChanged(certhandler::CertReceiverItf& certReceiver) = 0;
 
     /**
      * Finishes provisioning.
@@ -169,7 +186,7 @@ public:
      *
      * @returns RetWithError<CertTypes>.
      */
-    RetWithError<CertTypes> GetCertTypes() override;
+    RetWithError<CertTypes> GetCertTypes() const override;
 
     /**
      * Creates key.
@@ -202,7 +219,24 @@ public:
      * @returns Error.
      */
     Error GetCert(const String& certType, const Array<uint8_t>& issuer, const Array<uint8_t>& serial,
-        certhandler::CertInfo& resCert) override;
+        certhandler::CertInfo& resCert) const override;
+
+    /**
+     * Subscribes certificates receiver.
+     *
+     * @param certType certificate type.
+     * @param certReceiver certificate receiver.
+     * @returns Error.
+     */
+    Error SubscribeCertChanged(const String& certType, certhandler::CertReceiverItf& certReceiver) override;
+
+    /**
+     * Unsubscribes certificate receiver.
+     *
+     * @param certReceiver certificate receiver.
+     * @returns Error.
+     */
+    Error UnsubscribeCertChanged(certhandler::CertReceiverItf& certReceiver) override;
 
     /**
      * Finishes provisioning.

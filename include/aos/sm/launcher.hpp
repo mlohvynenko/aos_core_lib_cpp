@@ -10,10 +10,11 @@
 
 #include <assert.h>
 
+#include "aos/common/cloudprotocol/envvars.hpp"
 #include "aos/common/connectionsubsc.hpp"
 #include "aos/common/monitoring/monitoring.hpp"
 #include "aos/common/ocispec.hpp"
-#include "aos/common/tools/array.hpp"
+#include "aos/common/tools/map.hpp"
 #include "aos/common/tools/noncopyable.hpp"
 #include "aos/common/types.hpp"
 #include "aos/sm/config.hpp"
@@ -45,6 +46,25 @@ public:
     virtual Error RunInstances(const Array<ServiceInfo>& services, const Array<LayerInfo>& layers,
         const Array<InstanceInfo>& instances, bool forceRestart)
         = 0;
+
+    /**
+     * Overrides environment variables for specified instances.
+     *
+     * @param envVarsInfo environment variables info.
+     * @param statuses[out] environment variables statuses.
+     * @return Error
+     */
+    virtual Error OverrideEnvVars(const Array<cloudprotocol::EnvVarsInstanceInfo>& envVarsInfo,
+        cloudprotocol::EnvVarsInstanceStatusArray&                                 statuses)
+        = 0;
+
+    /**
+     * Sets cloud connection status.
+     *
+     * @param connected cloud connection status.
+     * @return Error
+     */
+    virtual Error SetCloudConnection(bool connected) = 0;
 };
 
 /**
@@ -107,6 +127,52 @@ public:
     virtual Error GetAllInstances(Array<InstanceInfo>& instances) = 0;
 
     /**
+     * Returns operation version.
+     *
+     * @return RetWithError<uint64_t>.
+     */
+    virtual RetWithError<uint64_t> GetOperationVersion() const = 0;
+
+    /**
+     * Sets operation version.
+     *
+     * @param version operation version.
+     * @return Error.
+     */
+    virtual Error SetOperationVersion(uint64_t version) = 0;
+
+    /**
+     * Returns instances's override environment variables array.
+     *
+     * @param envVarsInstanceInfos[out] instances's override environment variables array.
+     * @return Error.
+     */
+    virtual Error GetOverrideEnvVars(cloudprotocol::EnvVarsInstanceInfoArray& envVarsInstanceInfos) const = 0;
+
+    /**
+     * Sets instances's override environment variables array.
+     *
+     * @param envVarsInstanceInfos instances's override environment variables array.
+     * @return Error.
+     */
+    virtual Error SetOverrideEnvVars(const cloudprotocol::EnvVarsInstanceInfoArray& envVarsInstanceInfos) = 0;
+
+    /**
+     * Returns online time.
+     *
+     * @return RetWithError<Time>.
+     */
+    virtual RetWithError<Time> GetOnlineTime() const = 0;
+
+    /**
+     * Sets online time.
+     *
+     * @param time online time.
+     * @return Error.
+     */
+    virtual Error SetOnlineTime(const Time& time) = 0;
+
+    /**
      * Destroys storage interface.
      */
     virtual ~StorageItf() = default;
@@ -128,11 +194,7 @@ public:
     /**
      * Destroys launcher instance.
      */
-    ~Launcher()
-    {
-        mConnectionPublisher->Unsubscribe(*this);
-        mThread.Join();
-    }
+    ~Launcher() = default;
 
     /**
      * Initializes launcher.
@@ -147,6 +209,20 @@ public:
         ConnectionPublisherItf& connectionPublisher);
 
     /**
+     * Starts launcher.
+     *
+     * @return Error.
+     */
+    Error Start();
+
+    /**
+     * Stops launcher.
+     *
+     * @return Error.
+     */
+    Error Stop();
+
+    /**
      * Runs specified instances.
      *
      * @param services services info array.
@@ -157,6 +233,24 @@ public:
      */
     Error RunInstances(const Array<ServiceInfo>& services, const Array<LayerInfo>& layers,
         const Array<InstanceInfo>& instances, bool forceRestart = false) override;
+
+    /**
+     * Overrides environment variables for specified instances.
+     *
+     * @param envVarsInfo environment variables info.
+     * @param statuses[out] environment variables statuses.
+     * @return Error
+     */
+    Error OverrideEnvVars(const Array<cloudprotocol::EnvVarsInstanceInfo>& envVarsInfo,
+        cloudprotocol::EnvVarsInstanceStatusArray&                         statuses) override;
+
+    /**
+     * Sets cloud connection status.
+     *
+     * @param connected cloud connection status.
+     * @return Error
+     */
+    Error SetCloudConnection(bool connected) override;
 
     /**
      * Updates run instances status.
@@ -176,6 +270,14 @@ public:
      */
     void OnDisconnect() override;
 
+    /**
+     * Defines current operation version
+     * if new functionality doesn't allow existing services to work properly,
+     * this value should be increased.
+     * It will force to remove all services and their storages before first start.
+     */
+    static constexpr uint32_t cOperationVersion = 9;
+
 private:
     static constexpr auto cNumLaunchThreads = AOS_CONFIG_LAUNCHER_NUM_COOPERATE_LAUNCHES;
     static constexpr auto cThreadTaskSize   = AOS_CONFIG_LAUNCHER_THREAD_TASK_SIZE;
@@ -191,17 +293,7 @@ private:
     void  UpdateInstanceServices();
     Error UpdateStorage(const Array<InstanceInfo>& instances);
 
-    RetWithError<const Service*> GetService(const String& serviceID) const
-    {
-        auto findService = mCurrentServices.Find(
-            [&serviceID](const Service& service) { return service.Data().mServiceID == serviceID; });
-
-        if (!findService.mError.IsNone()) {
-            return {nullptr, findService.mError};
-        }
-
-        return findService.mValue;
-    }
+    RetWithError<const Service&> GetService(const String& serviceID) const { return mCurrentServices.At(serviceID); }
 
     Error StartInstance(const InstanceInfo& info);
     Error StopInstance(const InstanceIdent& ident);
@@ -224,10 +316,13 @@ private:
     Thread<cThreadTaskSize, cThreadStackSize> mThread;
     ThreadPool<cNumLaunchThreads, Max(cMaxNumInstances, cMaxNumServices, cMaxNumLayers), cThreadTaskSize,
         cThreadStackSize>
-        mLaunchPool;
+                        mLaunchPool;
+    ConditionalVariable mCondVar;
+    bool                mClose     = false;
+    bool                mConnected = false;
 
-    StaticArray<Service, cMaxNumServices>   mCurrentServices;
-    StaticArray<Instance, cMaxNumInstances> mCurrentInstances;
+    StaticMap<StaticString<cServiceIDLen>, Service, cMaxNumServices> mCurrentServices;
+    StaticMap<InstanceIdent, Instance, cMaxNumInstances>             mCurrentInstances;
 };
 
 /** @}*/

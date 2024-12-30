@@ -31,12 +31,7 @@ public:
      */
     RetWithError<Value&> At(const Key& key)
     {
-        auto item = mItems.Find([&key](const Pair<Key, Value>& item) { return item.mFirst == key; });
-
-        if (!item.mError.IsNone()) {
-            // cppcheck-suppress nullPointer
-            return {*static_cast<Value*>(nullptr), item.mError};
-        }
+        auto item = mItems.FindIf([&key](const Pair<Key, Value>& item) { return item.mFirst == key; });
 
         return {item.mValue->mSecond, item.mError};
     }
@@ -47,7 +42,12 @@ public:
      * @param key
      * @return RetWithError<const Value&>
      */
-    RetWithError<const Value&> At(const Key& key) const { return const_cast<Map<Key, Value>&>(*this).At(key); }
+    RetWithError<const Value&> At(const Key& key) const
+    {
+        auto item = mItems.FindIf([&key](const Pair<Key, Value>& item) { return item.mFirst == key; });
+
+        return {item.mValue->mSecond, item.mError};
+    }
 
     /**
      * Replaces map with elements from the array.
@@ -135,7 +135,7 @@ public:
     {
         const auto matchKey = [&key](const Pair<Key, Value>& item) { return item.mFirst == key; };
 
-        return mItems.Remove(matchKey).mError;
+        return mItems.RemoveIf(matchKey) ? ErrorEnum::eNone : ErrorEnum::eNotFound;
     }
 
     /**

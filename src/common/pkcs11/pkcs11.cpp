@@ -335,7 +335,7 @@ RetWithError<CK_FUNCTION_LIST_PTR> DynamicLibraryContext::Init()
 
 Error LibraryContext::Init()
 {
-    LockGuard lock(mMutex);
+    LockGuard lock {mMutex};
 
     Error err = ErrorEnum::eNone;
 
@@ -350,7 +350,7 @@ Error LibraryContext::Init()
         return ErrorEnum::eWrongState;
     }
 
-#if AOS_CONFIG_CRYPTOUTILS_PKCS11_OS_LOCKING
+#if AOS_CONFIG_CRYPTO_PKCS11_OS_LOCKING
     CK_C_INITIALIZE_ARGS initArgs {};
 
     initArgs.flags = CKF_OS_LOCKING_OK;
@@ -467,7 +467,9 @@ Error LibraryContext::GetLibInfo(LibInfo& libInfo) const
 
 RetWithError<SharedPtr<SessionContext>> LibraryContext::OpenSession(SlotID slotID, Flags flags)
 {
-    LockGuard lock(mMutex);
+    LockGuard lock {mMutex};
+
+    LOG_DBG() << "Open session: slotID=" << slotID;
 
     SessionParams params = {slotID, flags};
 
@@ -503,7 +505,7 @@ RetWithError<SharedPtr<SessionContext>> LibraryContext::OpenSession(SlotID slotI
 
 void LibraryContext::ClearSessions()
 {
-    LockGuard lock(mMutex);
+    LockGuard lock {mMutex};
 
     mSessions.Clear();
 }
@@ -583,6 +585,8 @@ Error SessionContext::GetSessionInfo(SessionInfo& info) const
 Error SessionContext::Login(UserType userType, const String& pin)
 {
     LockGuard lock {mMutex};
+
+    LOG_DBG() << "Login: userType=" << userType;
 
     if (!mFunctionList || !mFunctionList->C_Login) {
         return ErrorEnum::eWrongState;
@@ -928,15 +932,15 @@ Error SessionContext::FindObjectsFinal() const
 
 SharedPtr<LibraryContext> PKCS11Manager::OpenLibrary(const String& library)
 {
-    LockGuard lock(mMutex);
-
-    LOG_INF() << "Open library: path=" << library;
+    LockGuard lock {mMutex};
 
     for (auto& lib : mLibraries) {
         if (lib.mFirst == library) {
             return lib.mSecond;
         }
     }
+
+    LOG_INF() << "Open library: path=" << library;
 
     if (mLibraries.MaxSize() == mLibraries.Size()) {
         return nullptr;
@@ -1091,6 +1095,14 @@ RetWithError<PrivateKey> Utils::GenerateECDSAKeyPairWithLabel(
 
 RetWithError<PrivateKey> Utils::FindPrivateKey(const Array<uint8_t>& id, const String& label)
 {
+    StaticString<pkcs11::cIDStrLen> idStr;
+
+    if (auto err = idStr.ByteArrayToHex(id); !err.IsNone()) {
+        return {{}, AOS_ERROR_WRAP(err)};
+    }
+
+    LOG_DBG() << "Find private key: id=" << idStr << ", label=" << label;
+
     constexpr auto cSingleAttribute = 1;
 
     CK_OBJECT_CLASS privKeyClass = CKO_PRIVATE_KEY;
@@ -1106,7 +1118,7 @@ RetWithError<PrivateKey> Utils::FindPrivateKey(const Array<uint8_t>& id, const S
 
     auto err = mSession->FindObjects(privKeyTempl, privKeys);
     if (!err.IsNone()) {
-        return {{}, err};
+        return {{}, AOS_ERROR_WRAP(err)};
     }
 
     // Find public part with matching attributes: id, label & key type.
@@ -1130,12 +1142,12 @@ RetWithError<PrivateKey> Utils::FindPrivateKey(const Array<uint8_t>& id, const S
     for (const auto& privKey : privKeys) {
         err = mSession->GetAttributeValues(privKey, keyTypeAttribute, keyTypeValue);
         if (!err.IsNone()) {
-            return {{}, err};
+            return {{}, AOS_ERROR_WRAP(err)};
         }
 
         err = mSession->FindObjects(pubKeyTempl, pubKeys);
         if (!err.IsNone()) {
-            return {{}, err};
+            return {{}, AOS_ERROR_WRAP(err)};
         }
 
         if (pubKeys.IsEmpty()) {
@@ -1145,7 +1157,7 @@ RetWithError<PrivateKey> Utils::FindPrivateKey(const Array<uint8_t>& id, const S
         return ExportPrivateKey(privKey, pubKeys[0], keyType);
     }
 
-    return {{}, ErrorEnum::eNotFound};
+    return {{}, AOS_ERROR_WRAP(ErrorEnum::eNotFound)};
 }
 
 Error Utils::DeletePrivateKey(const PrivateKey& key)

@@ -19,14 +19,14 @@
  * Launcher thread task size.
  */
 #ifndef AOS_CONFIG_LAUNCHER_THREAD_TASK_SIZE
-#define AOS_CONFIG_LAUNCHER_THREAD_TASK_SIZE 256
+#define AOS_CONFIG_LAUNCHER_THREAD_TASK_SIZE 512
 #endif
 
 /**
  * Launcher thread stack size.
  */
 #ifndef AOS_CONFIG_LAUNCHER_THREAD_STACK_SIZE
-#define AOS_CONFIG_LAUNCHER_THREAD_STACK_SIZE 16384
+#define AOS_CONFIG_LAUNCHER_THREAD_STACK_SIZE 32768
 #endif
 
 /**
@@ -48,6 +48,27 @@
  */
 #ifndef AOS_CONFIG_SERVICEMANAGER_SERVICES_DIR
 #define AOS_CONFIG_SERVICEMANAGER_SERVICES_DIR "/var/aos/sm/services"
+#endif
+
+/**
+ * Node config JSON length.
+ */
+#ifndef AOS_CONFIG_RESOURCEMANAGER_NODE_CONFIG_JSON_LEN
+#define AOS_CONFIG_RESOURCEMANAGER_NODE_CONFIG_JSON_LEN 4096
+#endif
+
+/**
+ * Max number of network manager aliases.
+ */
+#ifndef AOS_CONFIG_NETWORKMANAGER_MAX_NUM_ALIASES
+#define AOS_CONFIG_NETWORKMANAGER_MAX_NUM_ALIASES 4
+#endif
+
+/**
+ * Max number of network manager exposed ports.
+ */
+#ifndef AOS_CONFIG_NETWORKMANAGER_MAX_NUM_EXPOSED_PORTS
+#define AOS_CONFIG_NETWORKMANAGER_MAX_NUM_EXPOSED_PORTS 8
 #endif
 
 #endif

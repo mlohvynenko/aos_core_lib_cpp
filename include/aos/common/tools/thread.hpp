@@ -165,7 +165,7 @@ private:
 /**
  * Aos mutex.
  */
-class Mutex : private NonCopyable {
+class Mutex {
 public:
     /**
      * Constructs Aos mutex.
@@ -479,7 +479,7 @@ public:
     template <typename T>
     Error AddTask(T functor, void* arg = nullptr)
     {
-        LockGuard lock(mMutex);
+        LockGuard lock {mMutex};
 
         auto err = mQueue.Push(Function());
         if (!err.IsNone()) {
@@ -508,7 +508,7 @@ public:
      */
     Error Run()
     {
-        LockGuard lock(mMutex);
+        LockGuard lock {mMutex};
 
         mShutdown = false;
 
@@ -603,6 +603,23 @@ public:
 
         return err;
     }
+
+#if AOS_CONFIG_THREAD_STACK_USAGE
+    size_t GetStackUsage()
+    {
+        size_t usedSize = 0;
+
+        for (auto& thread : mThreads) {
+            auto size = thread.GetStackUsage();
+
+            if (size > usedSize) {
+                usedSize = size;
+            }
+        }
+
+        return usedSize;
+    }
+#endif
 
 private:
     Thread<cMaxTaskSize, cThreadStackSize>                mThreads[cNumThreads];

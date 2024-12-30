@@ -9,6 +9,7 @@
 #define AOS_ERROR_HPP_
 
 #include <errno.h>
+#include <stdio.h>
 #include <string.h>
 
 #include "aos/common/config.hpp"
@@ -30,7 +31,7 @@ namespace aos {
 /**
  * Maximum error message length.
  */
-constexpr static auto cMaxErrorStrLen = AOS_CONFIG_ERROR_STR_LEN;
+constexpr static auto cMaxErrorStrLen = AOS_CONFIG_TOOLS_ERROR_STR_LEN;
 
 /**
  * Aos errors.
@@ -261,7 +262,7 @@ public:
     friend bool operator!=(Enum value, const Error& err) { return err.mErr != value; };
 
 private:
-    constexpr static size_t cMaxMessageLen = AOS_CONFIG_ERROR_MESSAGE_LEN + 1;
+    constexpr static size_t cMaxMessageLen = AOS_CONFIG_TOOLS_ERROR_MESSAGE_LEN + 1;
 
     /**
      * Copies error message.
@@ -271,13 +272,12 @@ private:
     void CopyMessage(const char* msg)
     {
         if (msg != nullptr) {
-            strncpy(mMessage, msg, sizeof(mMessage) - 1);
-            mMessage[sizeof(mMessage) - 1] = 0;
+            snprintf(mMessage, sizeof(mMessage), "%s", msg);
 
             return;
         }
 
-        mMessage[0] = 0;
+        mMessage[0] = '\0';
     }
 
     /**
@@ -350,6 +350,12 @@ struct RetWithError {
         , mError(error)
     {
     }
+
+    /**
+     * Comparison operators.
+     */
+    bool operator==(const RetWithError<T>& other) const { return mValue == other.mValue && mError == other.mError; }
+    bool operator!=(const RetWithError<T>& other) const { return !(*this == other); }
 
     /**
      * Holds returned value.

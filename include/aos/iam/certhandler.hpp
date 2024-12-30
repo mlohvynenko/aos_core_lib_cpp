@@ -13,9 +13,7 @@
 #include "aos/iam/certmodules/certmodule.hpp"
 #include "aos/iam/config.hpp"
 
-namespace aos {
-namespace iam {
-namespace certhandler {
+namespace aos::iam::certhandler {
 
 /** @addtogroup iam Identification and Access Manager
  *  @{
@@ -25,6 +23,24 @@ namespace certhandler {
  * Max number of certificate modules.
  */
 constexpr auto cIAMCertModulesMaxCount = AOS_CONFIG_CERTHANDLER_MODULES_MAX_COUNT;
+
+/**
+ * Certificate receiver interface.
+ */
+class CertReceiverItf {
+public:
+    /**
+     * Processes certificate updates.
+     *
+     * @param info certificate info.
+     */
+    virtual void OnCertChanged(const CertInfo& info) = 0;
+
+    /**
+     * Destructor.
+     */
+    virtual ~CertReceiverItf() = default;
+};
 
 /**
  * Certificate handler interface.
@@ -37,7 +53,7 @@ public:
      * @param[out] certTypes result certificate types.
      * @returns Error.
      */
-    virtual Error GetCertTypes(Array<StaticString<cCertTypeLen>>& certTypes) = 0;
+    virtual Error GetCertTypes(Array<StaticString<cCertTypeLen>>& certTypes) const = 0;
 
     /**
      * Owns security storage.
@@ -93,6 +109,23 @@ public:
         = 0;
 
     /**
+     * Subscribes certificates receiver.
+     *
+     * @param certType certificate type.
+     * @param certReceiver certificate receiver.
+     * @returns Error.
+     */
+    virtual Error SubscribeCertChanged(const String& certType, CertReceiverItf& certReceiver) = 0;
+
+    /**
+     * Unsubscribes certificate receiver.
+     *
+     * @param certReceiver certificate receiver.
+     * @returns Error.
+     */
+    virtual Error UnsubscribeCertChanged(CertReceiverItf& certReceiver) = 0;
+
+    /**
      * Creates a self signed certificate.
      *
      * @param certType certificate type.
@@ -145,7 +178,7 @@ public:
      * @param[out] certTypes result certificate types.
      * @returns Error.
      */
-    Error GetCertTypes(Array<StaticString<cCertTypeLen>>& certTypes) override;
+    Error GetCertTypes(Array<StaticString<cCertTypeLen>>& certTypes) const override;
 
     /**
      * Owns security storage.
@@ -199,6 +232,23 @@ public:
         const String& certType, const Array<uint8_t>& issuer, const Array<uint8_t>& serial, CertInfo& resCert) override;
 
     /**
+     * Subscribes certificates receiver.
+     *
+     * @param certType certificate type.
+     * @param certReceiver certificate receiver.
+     * @returns Error.
+     */
+    Error SubscribeCertChanged(const String& certType, CertReceiverItf& certReceiver) override;
+
+    /**
+     * Unsubscribes certificate receiver.
+     *
+     * @param certReceiver certificate receiver.
+     * @returns Error.
+     */
+    Error UnsubscribeCertChanged(CertReceiverItf& certReceiver) override;
+
+    /**
      * Creates a self signed certificate.
      *
      * @param certType certificate type.
@@ -221,16 +271,32 @@ public:
     virtual ~CertHandler();
 
 private:
+    static constexpr auto cIAMCertSubsMaxCount = AOS_CONFIG_CERTHANDLER_CERT_SUBS_MAX_COUNT;
+
     CertModule* FindModule(const String& certType) const;
+    Error       UpdateCerts(CertModule& module);
 
     mutable Mutex                                     mMutex;
     StaticArray<CertModule*, cIAMCertModulesMaxCount> mModules;
+
+    struct CertReceiverSubscription {
+        CertReceiverSubscription(const String& certType, const CertInfo& certInfo, CertReceiverItf* receiver)
+            : mCertType(certType)
+            , mCertInfo(certInfo)
+            , mReceiver(receiver)
+        {
+        }
+
+        StaticString<cCertTypeLen> mCertType;
+        CertInfo                   mCertInfo;
+        CertReceiverItf*           mReceiver;
+    };
+
+    StaticArray<CertReceiverSubscription, cIAMCertSubsMaxCount> mCertReceiverSubscriptions;
 };
 
 /** @}*/
 
-} // namespace certhandler
-} // namespace iam
-} // namespace aos
+} // namespace aos::iam::certhandler
 
 #endif
