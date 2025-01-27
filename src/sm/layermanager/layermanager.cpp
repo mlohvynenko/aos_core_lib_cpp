@@ -198,6 +198,23 @@ Error LayerManager::ProcessDesiredLayers(const Array<LayerInfo>& desiredLayers)
     return ErrorEnum::eNone;
 }
 
+Error LayerManager::ValidateLayer(const LayerData& layer)
+{
+    LOG_DBG() << "Validate layer: id=" << layer.mLayerID << ", version=" << layer.mVersion
+              << ", digest=" << layer.mLayerDigest;
+
+    const auto [digest, err] = mImageHandler->CalculateDigest(layer.mPath);
+    if (!err.IsNone()) {
+        return AOS_ERROR_WRAP(err);
+    }
+
+    if (digest != layer.mLayerDigest) {
+        return ErrorEnum::eInvalidChecksum;
+    }
+
+    return ErrorEnum::eNone;
+}
+
 Error LayerManager::RemoveItem(const String& id)
 {
     LOG_DBG() << "Remove item: id=" << id;
