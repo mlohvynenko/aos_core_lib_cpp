@@ -351,7 +351,7 @@ private:
                 + sizeof(LayerInfoStaticArray) + sizeof(servicemanager::ServiceDataStaticArray)
                 + sizeof(InstanceStatusStaticArray) + sizeof(servicemanager::ServiceData) + sizeof(InstanceData),
             sizeof(EnvVarsArray) + sizeof(InstanceStatusStaticArray) + sizeof(InstanceDataStaticArray)
-                + sizeof(ServiceStatusStaticArray));
+                + sizeof(ServiceStatusStaticArray) + +sizeof(LayerStatusStaticArray));
 
     void  ShowResourceUsageStats();
     Error ProcessLastInstances();
