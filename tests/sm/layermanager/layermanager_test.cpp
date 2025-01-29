@@ -359,7 +359,7 @@ TEST_F(LayerManagerTest, RemoveLayer)
     ASSERT_TRUE(mManager.ProcessDesiredLayers(desiredLayers, *layerStatuses).IsNone());
 
     if (auto it
-        = layerStatuses->FindIf([](const auto& status) { return status.mStatus != ComponentStatusEnum::eInstalled; });
+        = layerStatuses->FindIf([](const auto& status) { return status.mStatus != ItemStatusEnum::eInstalled; });
         it != layerStatuses->end() || layerStatuses->Size() != desiredLayers.Size()) {
         FAIL() << "Invalid layer status";
     }
