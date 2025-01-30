@@ -132,10 +132,10 @@ TEST_F(ServiceManagerTest, DamagedServicesAreRemovedOnStart)
 
 TEST_F(ServiceManagerTest, RemoveOutdatedServicesByTimer)
 {
-    mConfig.mTTL                  = aos::Time::cSeconds / 2;
+    mConfig.mTTL                  = aos::Time::cSeconds.Nanoseconds() / 2;
     mConfig.mRemoveOutdatedPeriod = aos::Time::cSeconds;
 
-    const auto        expiredTime    = aos::Time::Now().Add(-mConfig.mTTL);
+    const auto        expiredTime    = aos::Time::Now().Add(-mConfig.mTTL.Nanoseconds());
     const ServiceData expiredService = {
         "service1", "provider1", "1.0.0", "/aos/services/service1", "", expiredTime, ServiceStateEnum::eCached, 0, 0};
     const std::vector<ServiceData> expected = {

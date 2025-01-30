@@ -202,7 +202,7 @@ TEST_F(LayerManagerTest, ExpiredLayersAreClearedOnInit)
     auto config = CreateConfig();
     config.mTTL = Time::cSeconds;
 
-    const auto expiredTTL = Time::Now().Add(-config.mTTL * 2);
+    const auto expiredTTL = Time::Now().Add(-config.mTTL.Nanoseconds() * 2);
 
     auto cachedAndExpiredLayer  = CreateLayerData("layer1", 1024, LayerStateEnum::eCached, expiredTTL);
     cachedAndExpiredLayer.mPath = CreateExtractedLayerPath("layer1");
@@ -232,12 +232,12 @@ TEST_F(LayerManagerTest, ExpiredLayersAreClearedOnInit)
 TEST_F(LayerManagerTest, ValidateOutdateLayersByTimer)
 {
     auto config                  = CreateConfig();
-    config.mTTL                  = Time::cSeconds / 2;
+    config.mTTL                  = Time::cSeconds.Nanoseconds() / 2;
     config.mRemoveOutdatedPeriod = Time::cSeconds;
 
     InitTest(config);
 
-    const auto                   expiredTTL     = Time::Now().Add(-config.mTTL * 2);
+    const auto                   expiredTTL     = Time::Now().Add(-config.mTTL.Nanoseconds() * 2);
     const std::vector<LayerData> expectedLayers = {
         CreateLayerData("layer2", 1024, LayerStateEnum::eCached, Time::Now().Add(config.mTTL * 10)),
         CreateLayerData("layer3", 1024, LayerStateEnum::eActive, expiredTTL),

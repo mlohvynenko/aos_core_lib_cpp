@@ -71,12 +71,12 @@ public:
         sev.sigev_value.sival_ptr = this;
         sev.sigev_notify_function = TimerFunction;
 
-        its.it_value.tv_sec  = interval / Time::cSeconds;
-        its.it_value.tv_nsec = interval % Time::cSeconds;
+        its.it_value.tv_sec  = interval.Nanoseconds() / Time::cSeconds.Nanoseconds();
+        its.it_value.tv_nsec = interval.Nanoseconds() % Time::cSeconds.Nanoseconds();
 
         if (!mOneShot) {
-            its.it_interval.tv_sec  = interval / Time::cSeconds;
-            its.it_interval.tv_nsec = interval % Time::cSeconds;
+            its.it_interval.tv_sec  = interval.Nanoseconds() / Time::cSeconds.Nanoseconds();
+            its.it_interval.tv_nsec = interval.Nanoseconds() % Time::cSeconds.Nanoseconds();
         }
 
         auto ret = timer_create(CLOCK_MONOTONIC, &sev, &mTimerID);
