@@ -241,7 +241,7 @@ struct Config {
     StaticString<cFilePathLen> mServicesDir;
     StaticString<cFilePathLen> mDownloadDir;
     Duration                   mTTL;
-    Duration                   mRemoveOutdatedPeriod = 24 * Time::cHours;
+    Duration                   mRemoveOutdatedPeriod = Time::cHours * 24;
 };
 
 class ServiceManager : public ServiceManagerItf, public spaceallocator::ItemRemoverItf, private NonCopyable {

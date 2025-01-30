@@ -18,6 +18,59 @@ private:
     void SetUp() override { test::InitLog(); }
 };
 
+TEST_F(TimeTest, DurationToISO8601String)
+{
+    struct TestCase {
+        Duration    duration;
+        const char* expected;
+    } testCases[] = {
+        {Time::cDay * -6, "-P6D"},
+        {-6 * Time::cDay, "-P6D"},
+        {Time::cWeek, "P1W"},
+        {Time::cWeek * 2, "P2W"},
+        {Time::cWeek / 7, "P1D"},
+        {7 / Time::cWeek, "P1D"},
+        {Time::cWeek - Time::cDay, "P6D"},
+        {Time::cMonth, "P1M"},
+        {Time::cYear, "P1Y"},
+        {Time::cYear + Time::cMonth + Time::cWeek + Time::cDay + Time::cHours, "P1Y1M1W1DT1H"},
+        {Duration(0), "PT0S"},
+        {Duration(1), "PT0.000000001S"},
+        {Time::cMinutes + Time::cSeconds, "PT1M1S"},
+        {Time::cMinutes + Time::cMicroseconds * 32, "PT1M0.000032000S"},
+    };
+
+    for (const auto& testCase : testCases) {
+        LOG_DBG() << "Duration: " << testCase.duration;
+
+        EXPECT_STREQ(testCase.duration.ToISO8601String().CStr(), testCase.expected);
+    }
+}
+
+TEST_F(TimeTest, DurationParts)
+{
+    constexpr auto    cDays    = 8;
+    constexpr auto    cHours   = cDays * 24 + 1;
+    constexpr auto    cMinutes = cHours * 60 + 1;
+    constexpr auto    cSeconds = cMinutes * 60 + 1;
+    constexpr int64_t cMillis  = cSeconds * 1000 + 1;
+    constexpr int64_t cMicros  = cMillis * 1000 + 1;
+    constexpr int64_t cNanos   = cMicros * 1000 + 1;
+
+    constexpr Duration duration = cNanos;
+
+    // Test duration contains 1 milli, micro and nano second
+    // that makes the seconds, minutes, hours to have fractional part
+    constexpr float epsilon = 0.02;
+
+    EXPECT_NEAR(duration.Hours(), cHours, epsilon);
+    EXPECT_NEAR(duration.Minutes(), cMinutes, epsilon);
+    EXPECT_NEAR(duration.Seconds(), cSeconds, epsilon);
+    EXPECT_EQ(duration.Milliseconds(), cMillis);
+    EXPECT_EQ(duration.Microseconds(), cMicros);
+    EXPECT_EQ(duration.Nanoseconds(), cNanos);
+}
+
 TEST_F(TimeTest, Add4Years)
 {
     Time now             = Time::Now();
@@ -27,8 +80,8 @@ TEST_F(TimeTest, Add4Years)
     LOG_INF() << "Time now: " << now;
     LOG_INF() << "Four years later: " << fourYearsLater;
 
-    EXPECT_EQ(now.UnixNano() + Years(4), fourYearsLater.UnixNano());
-    EXPECT_EQ(now.UnixNano() + Years(-4), fourYearsBefore.UnixNano());
+    EXPECT_EQ(now.UnixNano() + Years(4).Nanoseconds(), fourYearsLater.UnixNano());
+    EXPECT_EQ(now.UnixNano() + Years(-4).Nanoseconds(), fourYearsBefore.UnixNano());
 }
 
 TEST_F(TimeTest, Compare)
