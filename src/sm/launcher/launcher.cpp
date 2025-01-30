@@ -993,7 +993,7 @@ Error Launcher::GetOutdatedInstances(Array<InstanceData>& instances)
     auto now = Time::Now();
 
     for (const auto& instance : mCurrentInstances) {
-        if (instance.GetOfflineTTL() && now.Add(instance.GetOfflineTTL()) < now) {
+        if (instance.GetOfflineTTL() && now.Add(instance.GetOfflineTTL().Nanoseconds()) < now) {
             if (auto err = instances.EmplaceBack(instance.Info(), instance.InstanceID()); !err.IsNone()) {
                 return AOS_ERROR_WRAP(err);
             }
