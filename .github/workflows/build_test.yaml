@@ -13,6 +13,8 @@ on:
 jobs:
   build:
     runs-on: ubuntu-22.04
+    env:
+      BUILD_WRAPPER_OUT_DIR: build_wrapper_output_directory # Directory where build-wrapper output will be placed
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -23,16 +25,31 @@ jobs:
         run: |
           sudo apt install lcov libsofthsm2 -y
 
-      - name: Build and test
-        run: |
-          mkdir build
-          cd build
-          cmake ../
-          cmake ../ -DWITH_TEST=ON -DWITH_COVERAGE=ON -DCMAKE_BUILD_TYPE=Debug
-          make; make tests; make coverage
+      - name: Install Build Wrapper
+        uses: SonarSource/sonarqube-scan-action/install-build-wrapper@v4
 
-      - name: Upload codecov report
-        uses: codecov/codecov-action@v4
+      - name: Run Build Wrapper
+        run: |
+          build-wrapper-linux-x86-64 --out-dir ${{ env.BUILD_WRAPPER_OUT_DIR }}
+
+      - name: SonarQube Scan
+        uses: SonarSource/sonarqube-scan-action@v4
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
         with:
-          token: ${{ secrets.CODECOV_TOKEN }}
-          files: ./build/coverage.total
+          args: >
+            --define sonar.cfamily.compile-commands="${{ env.BUILD_WRAPPER_OUT_DIR }}/compile_commands.json"
+
+      # - name: Build and test
+      #   run: |
+      #     mkdir build
+      #     cd build
+      #     cmake ../
+      #     cmake ../ -DWITH_TEST=ON -DWITH_COVERAGE=ON -DCMAKE_BUILD_TYPE=Debug
+      #     make; make tests; make coverage
+
+      # - name: Upload codecov report
+      #   uses: codecov/codecov-action@v4
+      #   with:
+      #     token: ${{ secrets.CODECOV_TOKEN }}
+      #     files: ./build/coverage.total
