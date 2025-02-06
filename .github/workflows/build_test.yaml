@@ -21,9 +21,9 @@ jobs:
         with:
           fetch-depth: 0
 
-      # - name: Prepare
-      #   run: |
-      #     sudo apt install lcov libsofthsm2 -y
+      - name: Prepare
+        run: |
+          sudo apt install lcov gcovr libsofthsm2 -y
 
       - name: Install Build Wrapper
         uses: SonarSource/sonarqube-scan-action/install-build-wrapper@v4
@@ -31,8 +31,9 @@ jobs:
       - name: Run Build Wrapper
         run: |
           mkdir build
-          cmake -S . -B build  -DCMAKE_BUILD_TYPE=Debug -DWITH_TEST=ON -DWITH_COVERAGE=ON -G "Unix Makefiles"  -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
-          build-wrapper-linux-x86-64 --out-dir ${{ env.BUILD_WRAPPER_OUT_DIR }} cmake --build build/ --config Debug 
+          cmake -S . -B build  -DCMAKE_BUILD_TYPE=Debug -DWITH_TEST=ON -DWITH_COVERAGE=ON -G "Unix Makefiles" -DCoverage_SONARQUBE=ON -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
+          build-wrapper-linux-x86-64 --out-dir ${{ env.BUILD_WRAPPER_OUT_DIR }} cmake --build build/ --config Debug
+          (cd build && make coverage)
 
           # ls -la build_wrapper_output_directory
           # ls -la build
@@ -53,6 +54,7 @@ jobs:
         with:
           args: >
             --define sonar.cfamily.compile-commands="${{ env.BUILD_WRAPPER_OUT_DIR }}/compile_commands.json"
+            --define sonar.coverageReportPaths=build/coverage_sonarqube.xml
 
       #     make; make tests; make coverage
 
