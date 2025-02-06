@@ -7,7 +7,7 @@ on:
 
   pull_request:
     branches:
-      - develop
+      - develop*
       - feature_*
 
 jobs:
@@ -21,9 +21,9 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Prepare
-        run: |
-          sudo apt install lcov libsofthsm2 -y
+      # - name: Prepare
+      #   run: |
+      #     sudo apt install lcov libsofthsm2 -y
 
       - name: Install Build Wrapper
         uses: SonarSource/sonarqube-scan-action/install-build-wrapper@v4
