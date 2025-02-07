@@ -4,15 +4,18 @@ on:
   push:
     branches:
       - main
+      - develop
 
   pull_request:
     branches:
-      - develop
+      - develop*
       - feature_*
 
 jobs:
   build:
     runs-on: ubuntu-22.04
+    env:
+      BUILD_WRAPPER_OUT_DIR: build_wrapper_output_directory # Directory where build-wrapper output will be placed
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -21,18 +24,43 @@ jobs:
 
       - name: Prepare
         run: |
-          sudo apt install lcov libsofthsm2 -y
+          sudo apt install lcov gcovr libsofthsm2 -y
 
-      - name: Build and test
+      - name: Install Build Wrapper
+        uses: SonarSource/sonarqube-scan-action/install-build-wrapper@v4
+
+      - name: Run Build Wrapper
         run: |
           mkdir build
-          cd build
-          cmake ../
-          cmake ../ -DWITH_TEST=ON -DWITH_COVERAGE=ON -DCMAKE_BUILD_TYPE=Debug
-          make; make tests; make coverage
+          cmake -S . -B build  -DCMAKE_BUILD_TYPE=Debug -DWITH_TEST=ON -DWITH_COVERAGE=ON -G "Unix Makefiles" -DCoverage_SONARQUBE=ON -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
+          build-wrapper-linux-x86-64 --out-dir ${{ env.BUILD_WRAPPER_OUT_DIR }} cmake --build build/ --config Debug
+          (cd build && make coverage)
 
-      - name: Upload codecov report
-        uses: codecov/codecov-action@v4
+          # ls -la build_wrapper_output_directory
+          # ls -la build
+
+          # cat "${{ env.BUILD_WRAPPER_OUT_DIR }}/compile_commands.json"
+
+      # - name: Build and test
+      #   run: |
+      #     mkdir build
+      #     cd build
+      #     cmake ../ -DWITH_TEST=ON -DWITH_COVERAGE=ON -DCMAKE_BUILD_TYPE=Debug
+      #     cd ..
+
+      - name: SonarQube Scan
+        uses: SonarSource/sonarqube-scan-action@v4
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
         with:
-          token: ${{ secrets.CODECOV_TOKEN }}
-          files: ./build/coverage.total
+          args: >
+            --define sonar.cfamily.compile-commands="${{ env.BUILD_WRAPPER_OUT_DIR }}/compile_commands.json"
+            --define sonar.coverageReportPaths=build/coverage_sonarqube.xml
+
+      #     make; make tests; make coverage
+
+      # - name: Upload codecov report
+      #   uses: codecov/codecov-action@v4
+      #   with:
+      #     token: ${{ secrets.CODECOV_TOKEN }}
+      #     files: ./build/coverage.total
