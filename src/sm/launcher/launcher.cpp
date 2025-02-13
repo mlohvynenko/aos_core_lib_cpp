@@ -1000,7 +1000,7 @@ Error Launcher::GetOutdatedInstances(Array<InstanceData>& instances)
 
 Error Launcher::HandleOfflineTTLs()
 {
-    auto outdatedInstances = SharedPtr<Array<InstanceData>>(&mAllocator, new (&mAllocator) InstanceDataStaticArray());
+    auto outdatedInstances = MakeShared<InstanceDataStaticArray>(&mAllocator);
 
     {
         UniqueLock lock {mMutex};
