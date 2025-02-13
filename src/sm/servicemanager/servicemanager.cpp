@@ -222,6 +222,10 @@ Error ServiceManager::ProcessDesiredServices(const Array<ServiceInfo>& services)
 
 Error ServiceManager::GetService(const String& serviceID, ServiceData& service)
 {
+    LockGuard lock {mMutex};
+
+    LOG_DBG() << "Get service: serviceID=" << serviceID;
+
     auto services = MakeUnique<ServiceDataStaticArray>(&mAllocator);
 
     if (auto err = mStorage->GetAllServices(*services); !err.IsNone()) {
