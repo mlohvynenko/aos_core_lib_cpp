@@ -179,7 +179,7 @@ public:
      */
     RetWithError<UniquePtr<SpaceItf>> AllocateSpace(uint64_t size) override
     {
-        return UniquePtr<SpaceItf>(new (&mAllocator) Space(size));
+        return UniquePtr<SpaceItf>(MakeUnique<Space>(&mAllocator, size));
     };
 
     /**
