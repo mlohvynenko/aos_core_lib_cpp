@@ -113,7 +113,9 @@ public:
         LockGuard lock {mMutex};
 
         if (mAllocations->IsFull() || GetAllocatedSize() + size > mMaxSize) {
-            assert(false);
+            assert(!mAllocations->IsFull());
+            assert(GetAllocatedSize() + size <= mMaxSize);
+
             return nullptr;
         }
 
