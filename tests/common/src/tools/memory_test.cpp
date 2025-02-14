@@ -49,6 +49,25 @@ TEST(MemoryTest, UniquePtr)
 
     EXPECT_EQ(allocator.FreeSize(), allocator.MaxSize());
 
+    // Construct with allocator
+
+    {
+        UniquePtr<uint32_t> uPtr(new (&allocator) uint32_t(), &allocator);
+        EXPECT_EQ(allocator.FreeSize(), allocator.MaxSize() - sizeof(uint32_t));
+    }
+
+    EXPECT_EQ(allocator.FreeSize(), allocator.MaxSize());
+
+    // Construct with deleter
+
+    {
+        auto deleter = [&allocator](uint32_t* ptr) { allocator.Free(ptr); };
+
+        UniquePtr<uint32_t, decltype(deleter)> uPtr(new (&allocator) uint32_t(), Move(deleter));
+    }
+
+    EXPECT_EQ(allocator.FreeSize(), allocator.MaxSize());
+
     // Move ownership
 
     UniquePtr<uint32_t> uPtr;
