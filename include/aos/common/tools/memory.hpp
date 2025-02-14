@@ -192,9 +192,22 @@ public:
      * @param deleter functor destroying the object.
      *
      */
-    UniquePtr(T* ptr = nullptr, Deleter&& deleter = Deleter())
+    UniquePtr(T* ptr, Deleter&& deleter)
         : mObject(ptr)
         , mDeleter(Move(deleter))
+    {
+    }
+
+    /**
+     * Default constructor.
+     *
+     * @param ptr pointer to an object to be destroyed.
+     * @param allocator allocator that object was allocated with.
+     *
+     */
+    UniquePtr(T* ptr = nullptr, Allocator* allocator = nullptr)
+        : mObject(ptr)
+        , mDeleter(DefaultDeleter<T>(allocator))
     {
     }
 
