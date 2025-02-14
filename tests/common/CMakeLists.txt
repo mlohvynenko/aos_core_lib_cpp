@@ -15,6 +15,7 @@ set(SOURCES
     ${PROJECT_SOURCE_DIR}/src/common/monitoring/average.cpp
     ${PROJECT_SOURCE_DIR}/src/common/monitoring/alertprocessor.cpp
     ${PROJECT_SOURCE_DIR}/src/common/monitoring/resourcemonitor.cpp
+    src/spaceallocator/spaceallocator_test.cpp
     src/alertprocessor_test.cpp
     src/crypto_test.cpp
     src/cryptoprovider_test.cpp
