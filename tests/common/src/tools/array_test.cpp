@@ -98,6 +98,67 @@ TEST(ArrayTest, Basic)
     }
 }
 
+TEST(ArrayTest, Assign)
+{
+    constexpr int                        cValues[] = {1, 2, 3, 4, 5};
+    StaticArray<int, std::size(cValues)> array;
+
+    for (const auto val : cValues) {
+        ASSERT_EQ(array.PushBack(val), ErrorEnum::eNone);
+    }
+
+    StaticArray<int, std::size(cValues)> array2;
+    ASSERT_EQ(array2.Assign(array), ErrorEnum::eNone);
+
+    ASSERT_EQ(array, array2);
+
+    StaticArray<int, std::size(cValues) - 1> array3;
+    ASSERT_EQ(array3.Assign(array), ErrorEnum::eNoMemory);
+
+    ASSERT_TRUE(array3.IsEmpty());
+}
+
+TEST(ArrayTest, AssignDestructsExistingData)
+{
+    auto ptr = std::make_shared<int>();
+
+    StaticArray<decltype(ptr), 1> array1;
+    ASSERT_EQ(array1.PushBack(ptr), ErrorEnum::eNone);
+
+    StaticArray<decltype(ptr), 1> array2;
+    ASSERT_EQ(array2.Assign(array1), ErrorEnum::eNone);
+
+    ASSERT_EQ(array1, array2);
+    ASSERT_EQ(ptr.use_count(), 3);
+
+    ASSERT_EQ(array2.Assign(array1), ErrorEnum::eNone);
+    ASSERT_EQ(ptr.use_count(), 3);
+}
+
+TEST(ArrayTest, AssignToArray)
+{
+    auto ptr = std::make_shared<int>();
+
+    StaticArray<decltype(ptr), 2> array1;
+    ASSERT_EQ(array1.PushBack(ptr), ErrorEnum::eNone);
+    ASSERT_EQ(array1.PushBack(ptr), ErrorEnum::eNone);
+
+    ASSERT_EQ(ptr.use_count(), 3);
+
+    Array<decltype(ptr)> array2;
+    ASSERT_EQ(array2.Assign(array1), ErrorEnum::eNoMemory);
+    ASSERT_TRUE(array2.IsEmpty());
+
+    ASSERT_EQ(ptr.use_count(), 3);
+
+    StaticArray<decltype(ptr), 1> array3;
+    ASSERT_EQ(array3.PushBack(ptr), ErrorEnum::eNone);
+    ASSERT_EQ(array3.Assign(array1), ErrorEnum::eNoMemory);
+    ASSERT_EQ(array3.Size(), 1);
+
+    ASSERT_EQ(ptr.use_count(), 4);
+}
+
 TEST(ArrayTest, Insert)
 {
     StaticArray<int, 32> array;
