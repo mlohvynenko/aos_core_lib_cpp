@@ -320,7 +320,7 @@
  * Label name len.
  */
 #ifndef AOS_CONFIG_TYPES_LABEL_NAME_LEN
-#define AOS_CONFIG_TYPES_LABEL_NAME_LEN 16
+#define AOS_CONFIG_TYPES_LABEL_NAME_LEN 64
 #endif
 
 /**
