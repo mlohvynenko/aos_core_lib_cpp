@@ -157,6 +157,20 @@ TEST(StringTest, StringArray)
     EXPECT_EQ(strArray[0].str2, "test2");
 }
 
+TEST(StringTest, Assign)
+{
+    const String cString = "Hello World!";
+
+    StaticString<12> str;
+
+    ASSERT_EQ(str.Assign(cString), ErrorEnum::eNone);
+    EXPECT_EQ(str, cString);
+
+    StaticString<1> str2;
+    ASSERT_EQ(str2.Assign(cString), ErrorEnum::eNoMemory);
+    ASSERT_TRUE(str2.IsEmpty());
+}
+
 TEST(StringTest, Split)
 {
     StaticArray<StaticString<4>, 4> splitArray;
