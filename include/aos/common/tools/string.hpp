@@ -65,10 +65,27 @@ public:
      */
     String& operator=(const String& str)
     {
-        Array::operator=(str);
-        *end() = 0;
+        [[maybe_unused]] auto err = Assign(str);
+        assert(err.IsNone());
 
         return *this;
+    }
+
+    /**
+     * Assigns string to string.
+     *
+     * @param str string.
+     * @return Error.
+     */
+    Error Assign(const String& str)
+    {
+        if (auto err = Array::Assign(str); !err.IsNone()) {
+            return err;
+        }
+
+        *end() = 0;
+
+        return ErrorEnum::eNone;
     }
 
     /**
