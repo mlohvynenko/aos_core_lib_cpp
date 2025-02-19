@@ -12,11 +12,6 @@ on:
       - develop
       - feature_*
       - branch_*
-    types:
-      - edited
-      - opened
-      - reopened
-      - synchronize
 
 jobs:
   build:
