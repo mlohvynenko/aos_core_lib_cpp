@@ -49,7 +49,13 @@ public:
         return result;
     }
 
-    Res Visit(...) const { return {}; }
+    template <typename T>
+    Res Visit(const T&) const
+    {
+        assert(false);
+
+        return {};
+    }
 
 private:
     uint64_t                   mCurrentVal;
