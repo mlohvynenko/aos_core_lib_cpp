@@ -216,14 +216,14 @@ public:
      *
      * @param ptr unique pointer to move from.
      */
-    UniquePtr(UniquePtr&& ptr) { *this = Move(ptr); }
+    UniquePtr(UniquePtr&& ptr) noexcept { *this = Move(ptr); }
 
     /**
      * Unique pointer move assignment.
      *
      * @param ptr unique pointer to assign from.
      */
-    UniquePtr& operator=(UniquePtr&& ptr)
+    UniquePtr& operator=(UniquePtr&& ptr) noexcept
     {
         mObject  = ptr.mObject;
         mDeleter = Move(ptr.mDeleter);
@@ -239,7 +239,7 @@ public:
      * @param ptr unique pointer to move from.
      */
     template <typename P, typename D, typename = EnableIf<IsBaseOf<T, P>::value>>
-    explicit UniquePtr(UniquePtr<P, D>&& ptr)
+    explicit UniquePtr(UniquePtr<P, D>&& ptr) noexcept
     {
         *this = Move(ptr);
     }
@@ -250,7 +250,7 @@ public:
      * @param ptr unique pointer to assign from.
      */
     template <typename P, typename D, typename = EnableIf<IsBaseOf<T, P>::value>>
-    UniquePtr& operator=(UniquePtr<P, D>&& ptr)
+    UniquePtr& operator=(UniquePtr<P, D>&& ptr) noexcept
     {
         mObject  = ptr.Release();
         mDeleter = Move(ptr.GetDeleter());
