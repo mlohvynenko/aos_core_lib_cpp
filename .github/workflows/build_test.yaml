@@ -5,10 +5,16 @@ on:
     branches:
       - main
 
-  pull_request:
+  pull_request_target:
+    types:
+      - edited
+      - opened
+      - reopened
+      - synchronize
     branches:
+      - main
       - develop
-      - feature_*
+      - sonar_integration
 
 jobs:
   build:
