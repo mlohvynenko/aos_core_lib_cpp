@@ -36,7 +36,7 @@ Error ResourceManager::Init(JSONProviderItf& jsonProvider, HostDeviceManagerItf&
         LOG_ERR() << "Failed to load unit config: err=" << err;
     }
 
-    LOG_DBG() << "Node config version: version=" << mConfig.mVersion << ", error=" << mConfigError;
+    LOG_DBG() << "Node config version: version=" << mConfig->mVersion << ", err=" << mConfigError;
 
     return ErrorEnum::eNone;
 }
@@ -45,9 +45,9 @@ RetWithError<StaticString<cVersionLen>> ResourceManager::GetNodeConfigVersion() 
 {
     LockGuard lock {mMutex};
 
-    LOG_DBG() << "Get node config version: version=" << mConfig.mVersion;
+    LOG_DBG() << "Get node config version: version=" << mConfig->mVersion;
 
-    return {mConfig.mVersion, mConfigError};
+    return {mConfig->mVersion, mConfigError};
 }
 
 Error ResourceManager::GetNodeConfig(aos::NodeConfig& nodeConfig) const
@@ -56,7 +56,7 @@ Error ResourceManager::GetNodeConfig(aos::NodeConfig& nodeConfig) const
 
     LOG_DBG() << "Get node config";
 
-    nodeConfig = mConfig.mNodeConfig;
+    nodeConfig = mConfig->mNodeConfig;
 
     return mConfigError;
 }
@@ -83,7 +83,7 @@ Error ResourceManager::GetResourceInfo(const String& resourceName, ResourceInfo&
 
     LOG_DBG() << "Get resource info: resourceName=" << resourceName;
 
-    for (const auto& resource : mConfig.mNodeConfig.mResources) {
+    for (const auto& resource : mConfig->mNodeConfig.mResources) {
         if (resource.mName == resourceName) {
             resourceInfo = resource;
 
@@ -231,7 +231,7 @@ Error ResourceManager::CheckNodeConfig(const String& version, const String& conf
 
     LOG_DBG() << "Check unit config: version=" << version;
 
-    if (version == mConfig.mVersion) {
+    if (version == mConfig->mVersion) {
         LOG_ERR() << "Invalid node config version version";
 
         return AOS_ERROR_WRAP(ErrorEnum::eInvalidArgument);
@@ -281,7 +281,7 @@ Error ResourceManager::UpdateNodeConfig(const String& version, const String& con
     }
 
     for (auto& subscriber : mSubscribers) {
-        subscriber->ReceiveNodeConfig(mConfig);
+        subscriber->ReceiveNodeConfig(*mConfig);
     }
 
     return ErrorEnum::eNone;
@@ -323,10 +323,13 @@ Error ResourceManager::LoadConfig()
 {
     auto configJSON = MakeUnique<StaticString<cNodeConfigJSONLen>>(&mAllocator);
 
+    mConfig.Reset();
+    mConfig = MakeUnique<NodeConfig>(&mAllocator);
+
     auto err = FS::ReadFileToString(mConfigPath, *configJSON);
     if (!err.IsNone()) {
         if (err == ENOENT) {
-            mConfig.mVersion = "0.0.0";
+            mConfig->mVersion = "0.0.0";
 
             return ErrorEnum::eNone;
         }
@@ -336,14 +339,15 @@ Error ResourceManager::LoadConfig()
         return AOS_ERROR_WRAP(err);
     }
 
-    err = mJsonProvider->NodeConfigFromJSON(*configJSON, mConfig);
+    err = mJsonProvider->NodeConfigFromJSON(*configJSON, *mConfig);
     if (!err.IsNone()) {
         mConfigError = err;
 
         return AOS_ERROR_WRAP(err);
     }
 
-    if (err = ValidateNodeConfig(mConfig); !err.IsNone()) {
+    err = ValidateNodeConfig(*mConfig);
+    if (!err.IsNone()) {
         mConfigError = err;
 
         return AOS_ERROR_WRAP(err);
@@ -413,7 +417,7 @@ Error ResourceManager::ValidateDevices(const Array<DeviceInfo>& devices) const
 
 Error ResourceManager::GetConfigDeviceInfo(const String& deviceName, DeviceInfo& deviceInfo) const
 {
-    for (auto& device : mConfig.mNodeConfig.mDevices) {
+    for (auto& device : mConfig->mNodeConfig.mDevices) {
         if (device.mName == deviceName) {
             deviceInfo = device;
 

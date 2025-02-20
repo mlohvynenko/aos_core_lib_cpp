@@ -376,7 +376,7 @@ public:
 
 private:
     static constexpr auto cMaxNodeConfigChangeSubscribers = 2;
-    static constexpr auto cAllocatorSize = Max(sizeof(StaticString<cNodeConfigJSONLen>) + sizeof(NodeConfig),
+    static constexpr auto cAllocatorSize = Max(sizeof(StaticString<cNodeConfigJSONLen>) + 2 * sizeof(NodeConfig),
         sizeof(DeviceInfo) + sizeof(StaticArray<StaticString<cInstanceIDLen>, cMaxNumInstances>));
 
     Error LoadConfig();
@@ -386,19 +386,18 @@ private:
     Error GetConfigDeviceInfo(const String& deviceName, DeviceInfo& deviceInfo) const;
 
     mutable Mutex                                                        mMutex;
+    mutable StaticAllocator<cAllocatorSize>                              mAllocator;
     JSONProviderItf*                                                     mJsonProvider {nullptr};
     HostDeviceManagerItf*                                                mHostDeviceManager {nullptr};
     StaticString<cNodeTypeLen>                                           mNodeType;
     StaticString<cFilePathLen>                                           mConfigPath;
     Error                                                                mConfigError {ErrorEnum::eNone};
-    NodeConfig                                                           mConfig;
+    UniquePtr<NodeConfig>                                                mConfig;
     StaticArray<NodeConfigReceiverItf*, cMaxNodeConfigChangeSubscribers> mSubscribers;
 
     mutable StaticMap<StaticString<cDeviceNameLen>, StaticArray<StaticString<cInstanceIDLen>, cMaxNumInstances>,
         cMaxNumNodeDevices>
         mAllocatedDevices;
-
-    mutable StaticAllocator<cAllocatorSize> mAllocator;
 };
 
 } // namespace aos::sm::resourcemanager
