@@ -263,6 +263,10 @@ public:
      */
     friend Log& operator<<(Log& log, const Variant& variant)
     {
+        if (variant.mTypeIndex == cInvalidTypeIndex) {
+            return log << "{}";
+        }
+
         // cppcheck-suppress returnTempReference
         return variant.ApplyVisitor(LogVisitor {log});
     }
