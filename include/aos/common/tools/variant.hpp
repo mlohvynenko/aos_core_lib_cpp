@@ -340,9 +340,11 @@ private:
 
     void CopyObject(const Variant& other)
     {
-        ObjectCopier visitor {this};
+        DestroyObject();
 
-        other.ApplyVisitor(visitor);
+        if (other.mTypeIndex != cInvalidTypeIndex) {
+            other.ApplyVisitor(ObjectCopier {this});
+        }
     }
 
     int mTypeIndex = cInvalidTypeIndex;
