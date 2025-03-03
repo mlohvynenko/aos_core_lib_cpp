@@ -16,12 +16,15 @@
 
 namespace aos::iam::certhandler {
 
-/***********************************************************************************************************************
- * Public
- **********************************************************************************************************************/
+Compilation Error is expected
 
-Error PKCS11Module::Init(const String& certType, const PKCS11ModuleConfig& config, pkcs11::PKCS11Manager& pkcs11,
-    crypto::x509::ProviderItf& x509Provider)
+    /***********************************************************************************************************************
+     * Public
+     **********************************************************************************************************************/
+
+    Error
+    PKCS11Module::Init(const String& certType, const PKCS11ModuleConfig& config, pkcs11::PKCS11Manager& pkcs11,
+        crypto::x509::ProviderItf& x509Provider)
 {
     mCertType     = certType;
     mConfig       = config;
