@@ -168,11 +168,19 @@ Error ServiceManager::ProcessDesiredServices(const Array<ServiceInfo>& services,
         return err;
     }
 
+    if (auto err = PrepareSpaceForServices(desiredServices->Size()); !err.IsNone()) {
+        return err;
+    }
+
     if (auto err = InstallServices(*desiredServices, serviceStatuses); !err.IsNone()) {
         return err;
     }
 
-    // Install new services
+    for (const auto& service : services) {
+        if (auto err = TruncServiceVersions(service.mServiceID, cNumServiceVersions); !err.IsNone()) {
+            LOG_WRN() << "Can't truncate service versions: serviceID=" << service.mServiceID << ", err=" << err;
+        }
+    }
 
     LOG_DBG() << "Allocator: allocated=" << mAllocator.MaxAllocatedSize() << ", maxSize=" << mAllocator.MaxSize();
 #if AOS_CONFIG_THREAD_STACK_USAGE
@@ -329,12 +337,6 @@ Error ServiceManager::ProcessAlreadyInstalledServices(
             return storageService.mServiceID == info.mServiceID && storageService.mVersion == info.mVersion;
         });
 
-        if (auto err = serviceStatuses.EmplaceBack(
-                storageService.mServiceID, storageService.mVersion, ItemStatusEnum::eInstalled);
-            !err.IsNone()) {
-            return err;
-        }
-
         if (it == desiredServices.end()) {
             if (storageService.mState != ServiceStateEnum::eCached) {
                 if (auto err = SetServiceState(storageService, ServiceStateEnum::eCached); !err.IsNone()) {
@@ -346,6 +348,12 @@ Error ServiceManager::ProcessAlreadyInstalledServices(
         }
 
         if (auto err = SetServiceState(storageService, ServiceStateEnum::eActive); !err.IsNone()) {
+            return err;
+        }
+
+        if (auto err = serviceStatuses.EmplaceBack(
+                storageService.mServiceID, storageService.mVersion, ItemStatusEnum::eInstalled);
+            !err.IsNone()) {
             return err;
         }
 
@@ -391,6 +399,76 @@ Error ServiceManager::InstallServices(const Array<ServiceInfo>& services, Array<
 
     mInstallPool.Wait();
     mInstallPool.Shutdown();
+
+    return ErrorEnum::eNone;
+}
+
+Error ServiceManager::PrepareSpaceForServices(size_t desiredServicesNum)
+{
+    auto storedServices = MakeUnique<ServiceDataStaticArray>(&mAllocator);
+
+    if (auto err = mStorage->GetAllServices(*storedServices); !err.IsNone()) {
+        return err;
+    }
+
+    storedServices->Sort([](const ServiceData& lhs, const ServiceData& rhs) {
+        return (lhs.mServiceID < rhs.mServiceID)
+            || (lhs.mServiceID == rhs.mServiceID && semver::CompareSemver(lhs.mVersion, rhs.mVersion).mValue == -1);
+    });
+
+    while (storedServices->Size() + desiredServicesNum > cMaxNumServices) {
+        auto it = storedServices->FindIf(
+            [](const ServiceData& service) { return service.mState == ServiceStateEnum::eCached; });
+
+        if (it == storedServices->end()) {
+            return AOS_ERROR_WRAP(Error(ErrorEnum::eFailed, "can't find cached service to remove"));
+        }
+
+        if (auto err = RemoveServiceFromSystem(*it); !err.IsNone()) {
+            return AOS_ERROR_WRAP(err);
+        }
+
+        storedServices->Erase(it);
+    }
+
+    return ErrorEnum::eNone;
+}
+
+Error ServiceManager::TruncServiceVersions(const String& serviceID, size_t threshold)
+{
+    auto storageServices = MakeUnique<StaticArray<ServiceData, cNumServiceVersions + 1>>(&mAllocator);
+
+    if (auto err = mStorage->GetServiceVersions(serviceID, *storageServices);
+        !err.IsNone() && !err.Is(ErrorEnum::eNotFound)) {
+        return AOS_ERROR_WRAP(err);
+    }
+
+    if (storageServices->Size() <= threshold) {
+        return ErrorEnum::eNone;
+    }
+
+    LOG_DBG() << "Truncate service versions: serviceID=" << serviceID << ", versions=" << storageServices->Size()
+              << ", threshold=" << threshold;
+
+    storageServices->Sort([](const ServiceData& lhs, const ServiceData& rhs) {
+        return semver::CompareSemver(lhs.mVersion, rhs.mVersion).mValue == -1;
+    });
+
+    size_t removedVersions = 0;
+
+    for (const auto& service : *storageServices) {
+        if (service.mState == ServiceStateEnum::eActive) {
+            continue;
+        }
+
+        if (auto err = RemoveService(service); !err.IsNone()) {
+            return AOS_ERROR_WRAP(err);
+        }
+
+        if (++removedVersions == storageServices->Size() - threshold) {
+            break;
+        }
+    }
 
     return ErrorEnum::eNone;
 }

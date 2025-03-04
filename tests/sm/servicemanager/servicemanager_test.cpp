@@ -233,8 +233,6 @@ TEST_F(ServiceManagerTest, ProcessDesiredServices)
                 {"service6", "provider6", "4.0.0", 0, "url", {}, 0},
             },
             std::vector<ServiceData> {
-                {"service1", "provider1", "1.0.0", FS::JoinPath(cServicesDir, "service1"), "", {},
-                    ServiceStateEnum::eCached, 0, 0},
                 {"service2", "provider2", "1.0.0", FS::JoinPath(cServicesDir, "service2"), "", {},
                     ServiceStateEnum::eCached, 0, 0},
                 {"service3", "provider3", "1.0.0", FS::JoinPath(cServicesDir, "service3"), "", {},
@@ -254,25 +252,53 @@ TEST_F(ServiceManagerTest, ProcessDesiredServices)
             },
         },
         {
+            std::vector<ServiceInfo> {
+                {"service1", "provider1", "3.0.0", 0, "url", {}, 0},
+                {"service2", "provider2", "3.0.0", 0, "url", {}, 0},
+                {"service3", "provider3", "3.0.0", 0, "url", {}, 0},
+                {"service4", "provider4", "3.0.0", 0, "url", {}, 0},
+                {"service5", "provider5", "3.0.0", 0, "url", {}, 0},
+                {"service6", "provider6", "3.0.0", 0, "url", {}, 0},
+                {"service7", "provider7", "3.0.0", 0, "url", {}, 0},
+                {"service8", "provider8", "3.0.0", 0, "url", {}, 0},
+            },
+            std::vector<ServiceData> {
+                {"service1", "provider1", "3.0.0", FS::JoinPath(cServicesDir, "service1"), "", {},
+                    ServiceStateEnum::eActive, 0, 0},
+                {"service2", "provider2", "3.0.0", FS::JoinPath(cServicesDir, "service2"), "", {},
+                    ServiceStateEnum::eActive, 0, 0},
+                {"service3", "provider3", "3.0.0", FS::JoinPath(cServicesDir, "service3"), "", {},
+                    ServiceStateEnum::eActive, 0, 0},
+                {"service4", "provider4", "3.0.0", FS::JoinPath(cServicesDir, "service4"), "", {},
+                    ServiceStateEnum::eActive, 0, 0},
+                {"service5", "provider5", "3.0.0", FS::JoinPath(cServicesDir, "service5"), "", {},
+                    ServiceStateEnum::eActive, 0, 0},
+                {"service6", "provider6", "3.0.0", FS::JoinPath(cServicesDir, "service6"), "", {},
+                    ServiceStateEnum::eActive, 0, 0},
+                {"service7", "provider7", "3.0.0", FS::JoinPath(cServicesDir, "service7"), "", {},
+                    ServiceStateEnum::eActive, 0, 0},
+                {"service8", "provider8", "3.0.0", FS::JoinPath(cServicesDir, "service8"), "", {},
+                    ServiceStateEnum::eActive, 0, 0},
+            },
+        },
+        {
             std::vector<ServiceInfo> {},
             std::vector<ServiceData> {
-                {"service1", "provider1", "1.0.0", FS::JoinPath(cServicesDir, "service1"), "", {},
+                {"service1", "provider1", "3.0.0", FS::JoinPath(cServicesDir, "service1"), "", {},
                     ServiceStateEnum::eCached, 0, 0},
-                {"service2", "provider2", "1.0.0", FS::JoinPath(cServicesDir, "service2"), "", {},
+                {"service2", "provider2", "3.0.0", FS::JoinPath(cServicesDir, "service2"), "", {},
                     ServiceStateEnum::eCached, 0, 0},
-                {"service3", "provider3", "1.0.0", FS::JoinPath(cServicesDir, "service3"), "", {},
+                {"service3", "provider3", "3.0.0", FS::JoinPath(cServicesDir, "service3"), "", {},
                     ServiceStateEnum::eCached, 0, 0},
-                {"service4", "provider4", "1.0.0", FS::JoinPath(cServicesDir, "service4"), "", {},
-                    ServiceStateEnum::eCached, 0, 0},
-                {"service4", "provider4", "2.0.0", FS::JoinPath(cServicesDir, "service4"), "", {},
-                    ServiceStateEnum::eCached, 0, 0},
-                {"service5", "provider5", "1.0.0", FS::JoinPath(cServicesDir, "service5"), "", {},
+                {"service4", "provider4", "3.0.0", FS::JoinPath(cServicesDir, "service4"), "", {},
                     ServiceStateEnum::eCached, 0, 0},
                 {"service5", "provider5", "3.0.0", FS::JoinPath(cServicesDir, "service5"), "", {},
                     ServiceStateEnum::eCached, 0, 0},
-                {"service6", "provider6", "1.0.0", FS::JoinPath(cServicesDir, "service6"), "", {},
+                {"service6", "provider6", "3.0.0", FS::JoinPath(cServicesDir, "service6"), "", {},
                     ServiceStateEnum::eCached, 0, 0},
-                {"service6", "provider6", "4.0.0", FS::JoinPath(cServicesDir, "service6"), "", {},
+                {"service7", "provider7", "3.0.0", FS::JoinPath(cServicesDir, "service7"), "", {},
+                    ServiceStateEnum::eCached, 0, 0},
+                {"service8", "provider8", "3.0.0", FS::JoinPath(cServicesDir, "service8"), "", {},
                     ServiceStateEnum::eCached, 0, 0},
             },
         },
@@ -295,7 +321,7 @@ TEST_F(ServiceManagerTest, ProcessDesiredServices)
                             Array<ServiceInfo>(testItem.mInfo.data(), testItem.mInfo.size()), *serviceStatuses)
                         .IsNone());
 
-        ASSERT_EQ(serviceStatuses->Size(), testItem.mData.size()) << "Invalid service status size";
+        ASSERT_EQ(serviceStatuses->Size(), testItem.mInfo.size()) << "Invalid service status size";
 
         if (auto it
             = serviceStatuses->FindIf([](const auto& status) { return status.mStatus != ItemStatusEnum::eInstalled; });
