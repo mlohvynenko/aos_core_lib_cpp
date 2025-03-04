@@ -53,17 +53,11 @@ public:
     {
         std::lock_guard lock {mMutex};
 
-        Error err = ErrorEnum::eNotFound;
-
         for (const auto& service : mServices) {
             if (service.mServiceID == serviceID) {
-                if (auto errPushBack = services.PushBack(service); !err.IsNone()) {
-                    err = AOS_ERROR_WRAP(errPushBack);
-
-                    break;
+                if (auto err = services.PushBack(service); !err.IsNone()) {
+                    return AOS_ERROR_WRAP(err);
                 }
-
-                err = ErrorEnum::eNone;
             }
         }
 
