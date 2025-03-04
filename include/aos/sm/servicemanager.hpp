@@ -355,19 +355,21 @@ public:
     Error RemoveItem(const String& id) override;
 
 private:
-    static constexpr auto cNumInstallThreads = AOS_CONFIG_SERVICEMANAGER_NUM_COOPERATE_INSTALLS;
-    static constexpr auto cImageManifestFile = "manifest.json";
-    static constexpr auto cImageBlobsFolder  = "blobs";
-    static constexpr auto cAllocatorItemLen  = cServiceIDLen + cVersionLen + 1;
+    static constexpr auto cNumInstallThreads  = AOS_CONFIG_SERVICEMANAGER_NUM_COOPERATE_INSTALLS;
+    static constexpr auto cImageManifestFile  = "manifest.json";
+    static constexpr auto cImageBlobsFolder   = "blobs";
+    static constexpr auto cAllocatorItemLen   = cServiceIDLen + cVersionLen + 1;
+    static constexpr auto cNumServiceVersions = 2;
 
     Error ProcessAlreadyInstalledServices(Array<ServiceInfo>& desiredServices, Array<ServiceStatus>& serviceStatuses);
     Error InstallServices(const Array<ServiceInfo>& services, Array<ServiceStatus>& serviceStatuses);
-
-    Error                                          RemoveDamagedServiceFolders(const Array<ServiceData>& services);
-    Error                                          RemoveOutdatedServices(const Array<ServiceData>& services);
-    Error                                          RemoveServiceFromSystem(const ServiceData& service);
-    Error                                          InstallService(const ServiceInfo& service);
-    Error                                          SetServiceState(const ServiceData& service, ServiceState state);
+    Error PrepareSpaceForServices(size_t desiredServicesNum);
+    Error TruncServiceVersions(const String& serviceID, size_t threshold);
+    Error RemoveDamagedServiceFolders(const Array<ServiceData>& services);
+    Error RemoveOutdatedServices(const Array<ServiceData>& services);
+    Error RemoveServiceFromSystem(const ServiceData& service);
+    Error InstallService(const ServiceInfo& service);
+    Error SetServiceState(const ServiceData& service, ServiceState state);
     RetWithError<StaticString<cFilePathLen>>       DigestToPath(const String& imagePath, const String& digest);
     RetWithError<StaticString<cAllocatorItemLen>>  FormatAllocatorItemID(const ServiceData& service);
     RetWithError<StaticString<oci::cMaxDigestLen>> GetManifestChecksum(const String& servicePath);
