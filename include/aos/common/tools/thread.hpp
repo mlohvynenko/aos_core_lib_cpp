@@ -19,7 +19,7 @@
 #include "aos/common/tools/queue.hpp"
 #include "aos/common/tools/time.hpp"
 
-#if AOS_CONFIG_THREAD_STACK_GUARD_SIZE != 0
+#if AOS_CONFIG_THREAD_STACK_GUARD_SIZE != 0 && AOS_CONFIG_THREAD_STACK_USAGE
 #include <sys/mman.h>
 #endif
 
