@@ -286,6 +286,12 @@ TEST_F(LayerManagerTest, ProcessDesiredLayers)
         {{"layer1", "layer2", "layer3"}, {"sha256:layer1", "sha256:layer2", "sha256:layer3"}, {}, {}},
         {{"layer1", "layer3"}, {"sha256:layer1", "sha256:layer3"}, {"sha256:layer2"}, {}},
         {{"layer1", "layer2"}, {"sha256:layer1", "sha256:layer2"}, {"sha256:layer3"}, {"sha256:layer2"}},
+        {{"l1", "l2", "l3", "l4", "l5", "l6", "l7", "l8"},
+            {"sha256:l1", "sha256:l2", "sha256:l3", "sha256:l4", "sha256:l5", "sha256:l6", "sha256:l7", "sha256:l8"},
+            {"sha256:layer1", "sha256:layer2"}, {}},
+        {{"l1", "l2", "l3", "l4", "l5", "l6", "l7", "l8"},
+            {"sha256:l1", "sha256:l2", "sha256:l3", "sha256:l4", "sha256:l5", "sha256:l6", "sha256:l7", "sha256:l8"},
+            {}, {}},
     };
 
     SetProcessDesiredLayerExpectedCalls();
@@ -304,7 +310,7 @@ TEST_F(LayerManagerTest, ProcessDesiredLayers)
             FAIL() << "Invalid layer status";
         }
 
-        StaticArray<LayerData, 4> dbLayers;
+        StaticArray<LayerData, cMaxNumLayers> dbLayers;
 
         err = mStorage.GetAllLayers(dbLayers);
         ASSERT_TRUE(err.IsNone()) << err.Message();
