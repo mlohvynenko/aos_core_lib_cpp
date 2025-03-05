@@ -6,6 +6,7 @@
 
 #include "aos/sm/layermanager.hpp"
 #include "aos/common/tools/fs.hpp"
+#include "aos/common/tools/semver.hpp"
 #include "log.hpp"
 
 namespace aos::sm::layermanager {
@@ -147,15 +148,13 @@ Error LayerManager::ProcessDesiredLayers(const Array<LayerInfo>& desiredLayers, 
 
     LOG_DBG() << "Process desired layers";
 
-    auto storageLayers = MakeUnique<LayerDataStaticArray>(&mAllocator);
+    auto layersToInstall = MakeUnique<LayerInfoStaticArray>(&mAllocator, desiredLayers);
 
-    if (auto err = mStorage->GetAllLayers(*storageLayers); !err.IsNone()) {
+    if (auto err = UpdateCachedLayers(layerStatuses, *layersToInstall); !err.IsNone()) {
         return AOS_ERROR_WRAP(err);
     }
 
-    auto layersToInstall = MakeUnique<LayerInfoStaticArray>(&mAllocator, desiredLayers);
-
-    if (auto err = UpdateCachedLayers(*storageLayers, layerStatuses, *layersToInstall); !err.IsNone()) {
+    if (auto err = PrepareSpaceForLayers(layersToInstall->Size()); !err.IsNone()) {
         return AOS_ERROR_WRAP(err);
     }
 
@@ -254,6 +253,35 @@ Error LayerManager::RemoveItem(const String& id)
 /***********************************************************************************************************************
  * Private
  **********************************************************************************************************************/
+
+Error LayerManager::PrepareSpaceForLayers(size_t desiredLayersNum)
+{
+    auto installedLayers = MakeUnique<LayerDataStaticArray>(&mAllocator);
+
+    if (auto err = mStorage->GetAllLayers(*installedLayers); !err.IsNone()) {
+        return AOS_ERROR_WRAP(err);
+    }
+
+    installedLayers->Sort([](const LayerData& lhs, const LayerData& rhs) {
+        return semver::CompareSemver(lhs.mVersion, rhs.mVersion).mValue == -1;
+    });
+
+    while (installedLayers->Size() + desiredLayersNum > cMaxNumLayers) {
+        auto it
+            = installedLayers->FindIf([](const LayerData& layer) { return layer.mState == LayerStateEnum::eCached; });
+        if (it == installedLayers->end()) {
+            return ErrorEnum::eNoMemory;
+        }
+
+        if (auto err = RemoveLayerFromSystem(*it); !err.IsNone()) {
+            return AOS_ERROR_WRAP(err);
+        }
+
+        installedLayers->Erase(it);
+    }
+
+    return ErrorEnum::eNone;
+}
 
 Error LayerManager::RemoveDamagedLayerFolders()
 {
@@ -406,15 +434,30 @@ Error LayerManager::RemoveLayerFromSystem(const LayerData& layer)
     return ErrorEnum::eNone;
 }
 
-Error LayerManager::UpdateCachedLayers(
-    const Array<LayerData>& stored, Array<LayerStatus>& statuses, Array<LayerInfo>& result)
+Error LayerManager::UpdateCachedLayers(Array<LayerStatus>& statuses, Array<LayerInfo>& layersToInstall)
 {
     LOG_DBG() << "Update cached layers";
 
-    for (const auto& storageLayer : stored) {
-        auto layer = result.FindIf([&storageLayer](const auto& desiredLayer) {
+    auto storageLayers = MakeUnique<LayerDataStaticArray>(&mAllocator);
+
+    if (auto err = mStorage->GetAllLayers(*storageLayers); !err.IsNone()) {
+        return AOS_ERROR_WRAP(err);
+    }
+
+    for (const auto& storageLayer : *storageLayers) {
+        auto layer = layersToInstall.FindIf([&storageLayer](const auto& desiredLayer) {
             return storageLayer.mLayerDigest == desiredLayer.mLayerDigest;
         });
+
+        if (layer == layersToInstall.end()) {
+            if (storageLayer.mState != LayerStateEnum::eCached) {
+                if (auto err = SetLayerState(storageLayer, LayerStateEnum::eCached); !err.IsNone()) {
+                    return AOS_ERROR_WRAP(err);
+                }
+            }
+
+            continue;
+        }
 
         if (auto err = statuses.EmplaceBack(
                 storageLayer.mLayerID, storageLayer.mLayerDigest, storageLayer.mVersion, ItemStatusEnum::eInstalled);
@@ -426,23 +469,13 @@ Error LayerManager::UpdateCachedLayers(
             statuses.Back().SetError(err, ItemStatusEnum::eError);
         }
 
-        if (layer != result.end()) {
-            if (storageLayer.mState == LayerStateEnum::eCached) {
-                if (auto err = SetLayerState(storageLayer, LayerStateEnum::eActive); !err.IsNone()) {
-                    return AOS_ERROR_WRAP(err);
-                }
-            }
-
-            result.Erase(layer);
-
-            continue;
-        }
-
-        if (storageLayer.mState != LayerStateEnum::eCached) {
-            if (auto err = SetLayerState(storageLayer, LayerStateEnum::eCached); !err.IsNone()) {
+        if (storageLayer.mState == LayerStateEnum::eCached) {
+            if (auto err = SetLayerState(storageLayer, LayerStateEnum::eActive); !err.IsNone()) {
                 return AOS_ERROR_WRAP(err);
             }
         }
+
+        layersToInstall.Erase(layer);
     }
 
     return ErrorEnum::eNone;
