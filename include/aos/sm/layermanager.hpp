@@ -272,13 +272,13 @@ private:
         = Max(cNumInstallThreads * (sizeof(oci::ImageManifest) + sizeof(LayerData)) + sizeof(LayerDataStaticArray),
             sizeof(LayerDataStaticArray) + sizeof(FS::DirIterator) * 2);
 
+    Error PrepareSpaceForLayers(size_t desiredLayersNum);
     Error RemoveDamagedLayerFolders();
     Error SetOutdatedLayers();
     Error SetLayerState(const LayerData& layer, LayerState state);
     Error RemoveOutdatedLayers();
     Error RemoveLayerFromSystem(const LayerData& layer);
-    Error UpdateCachedLayers(
-        const Array<LayerData>& stored, Array<LayerStatus>& statuses, Array<aos::LayerInfo>& result);
+    Error UpdateCachedLayers(Array<LayerStatus>& statuses, Array<aos::LayerInfo>& layersToInstall);
     Error InstallLayer(const aos::LayerInfo& layer);
 
     Config                             mConfig                 = {};
