@@ -197,14 +197,12 @@ Error ResourceMonitor::StopInstanceMonitoring(const String& instanceID)
 
     Error stopErr;
 
-    if (auto err = mInstanceMonitoringData.Remove(instanceID); !err.IsNone() && stopErr.IsNone()) {
-        stopErr = AOS_ERROR_WRAP(err);
-    }
-
     if (auto err = mAverage.StopInstanceMonitoring(instanceData->mSecond.mInstanceIdent);
         !err.IsNone() && stopErr.IsNone()) {
         stopErr = AOS_ERROR_WRAP(err);
     }
+
+    mInstanceMonitoringData.Erase(instanceData);
 
     mInstanceAlertProcessors.Remove(instanceID);
 
