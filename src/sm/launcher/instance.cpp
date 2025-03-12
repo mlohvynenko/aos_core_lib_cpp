@@ -111,7 +111,7 @@ Error Instance::Start()
         return AOS_ERROR_WRAP(err);
     }
 
-    auto runStatus = mRunner.StartInstance(mInstanceID, mRuntimeDir, {});
+    auto runStatus = mRunner.StartInstance(mInstanceID, mRuntimeDir, serviceConfig->mRunParameters);
 
     mRunState = runStatus.mState;
 
