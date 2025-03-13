@@ -212,13 +212,6 @@
 #endif
 
 /**
- * Max number of networks.
- */
-#ifndef AOS_CONFIG_TYPES_MAX_NUM_NETWORKS
-#define AOS_CONFIG_TYPES_MAX_NUM_NETWORKS 4
-#endif
-
-/**
  * Host name len.
  */
 #ifndef AOS_CONFIG_TYPES_HOST_NAME_LEN

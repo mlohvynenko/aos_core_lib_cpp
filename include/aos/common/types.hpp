@@ -236,11 +236,6 @@ constexpr auto cMaxNumDNSServers = AOS_CONFIG_TYPES_MAX_NUM_DNS_SERVERS;
 constexpr auto cMaxNumFirewallRules = AOS_CONFIG_TYPES_MAX_NUM_FIREWALL_RULES;
 
 /**
- * Max number of networks.
- */
-constexpr auto cMaxNumNetworks = AOS_CONFIG_TYPES_MAX_NUM_NETWORKS;
-
-/**
  * Host name len.
  */
 constexpr auto cHostNameLen = AOS_CONFIG_TYPES_HOST_NAME_LEN;
