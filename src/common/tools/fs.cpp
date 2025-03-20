@@ -23,6 +23,27 @@ DirIterator::DirIterator(const String& path)
 {
 }
 
+DirIterator::DirIterator(DirIterator&& other)
+    : mDir(other.mDir)
+    , mEntry(other.mEntry)
+    , mRoot(other.mRoot)
+{
+    other.mDir = nullptr;
+}
+
+DirIterator& DirIterator::operator=(DirIterator&& other)
+{
+    if (this != &other) {
+        mDir   = other.mDir;
+        mEntry = other.mEntry;
+        mRoot  = other.mRoot;
+
+        other.mDir = nullptr;
+    }
+
+    return *this;
+}
+
 DirIterator::~DirIterator()
 {
     if (mDir) {

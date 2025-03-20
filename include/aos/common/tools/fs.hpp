@@ -11,6 +11,7 @@
 #include <dirent.h>
 
 #include "aos/common/tools/config.hpp"
+#include "aos/common/tools/noncopyable.hpp"
 #include "aos/common/tools/string.hpp"
 
 namespace aos {
@@ -25,7 +26,7 @@ namespace fs {
  * Directory iterator.
  * The iteration order is unspecified, except that each directory entry is visited only once.
  */
-class DirIterator {
+class DirIterator : public NonCopyable {
 public:
     /**
      * Directory entry.
@@ -41,6 +42,21 @@ public:
      * @param path directory path.
      */
     explicit DirIterator(const String& path);
+
+    /**
+     * Move constructor.
+     *
+     * @param other iterator to move from.
+     */
+    DirIterator(DirIterator&& other);
+
+    /**
+     * Move assignment.
+     *
+     * @param other iterator to move from.
+     * @return DirIterator&.
+     */
+    DirIterator& operator=(DirIterator&& other);
 
     /**
      * Destructor.
