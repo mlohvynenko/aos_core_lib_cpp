@@ -21,6 +21,11 @@ namespace aos {
  */
 constexpr auto cFilePathLen = AOS_CONFIG_FS_FILE_PATH_LEN;
 
+/**
+ * Directory iterator max count.
+ */
+constexpr auto cDirIteratorMaxSize = AOS_CONFIG_FS_DIR_ITERATOR_MAX_COUNT;
+
 namespace fs {
 /**
  * Directory iterator.
@@ -96,6 +101,8 @@ private:
     Entry                      mEntry;
     StaticString<cFilePathLen> mRoot;
 };
+
+using DirIteratorStaticArray = StaticArray<DirIterator, cDirIteratorMaxSize>;
 
 /**
  * Appends path to string.
@@ -237,6 +244,14 @@ Error WriteFile(const String& fileName, const Array<uint8_t>& data, uint32_t per
  * @return Error.
  */
 Error WriteStringToFile(const String& fileName, const String& text, uint32_t perm);
+
+/**
+ * Calculates size of the file or directory.
+ *
+ * @param path file or directory path.
+ * @return RetWithError<size_t>.
+ */
+RetWithError<size_t> CalculateSize(const String& path);
 
 } // namespace fs
 } // namespace aos
