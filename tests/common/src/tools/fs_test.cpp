@@ -368,3 +368,30 @@ TEST_F(FSTest, DirIterator)
     auto iterator = fs::DirIterator((walkDirRoot / "not-existing-dir").c_str());
     EXPECT_FALSE(iterator.Next());
 }
+
+TEST_F(FSTest, CalculateSize)
+{
+    const auto walkDirRoot     = cBaseTestDir / "calculate-dir-test";
+    const auto multipleSubDirs = walkDirRoot / "sd1" / "sd2" / "sd3";
+
+    ASSERT_TRUE(fs::MakeDirAll(multipleSubDirs.c_str()).IsNone());
+    CreateFile((multipleSubDirs / "fff.txt").c_str(), std::string(2048, 'a').c_str(), 0444);
+
+    EXPECT_EQ(fs::CalculateSize(walkDirRoot.c_str()), RetWithError<size_t>(2048));
+
+    const std::vector folders = {
+        walkDirRoot / "d1",
+        walkDirRoot / "d2",
+        walkDirRoot / "d3",
+    };
+
+    for (const auto& folder : folders) {
+        ASSERT_TRUE(fs::MakeDirAll(folder.c_str()).IsNone());
+
+        CreateFile((folder / "f.txt").c_str(), std::string(1024, 'a').c_str(), 0444);
+    }
+
+    EXPECT_EQ(fs::CalculateSize(walkDirRoot.c_str()), RetWithError<size_t>(3 * 1024 + 2048));
+
+    EXPECT_EQ(fs::CalculateSize("does-not-exists"), RetWithError<size_t>(0));
+}

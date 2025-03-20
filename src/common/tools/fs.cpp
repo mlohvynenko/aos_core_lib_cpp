@@ -14,6 +14,17 @@
 namespace aos::fs {
 
 /***********************************************************************************************************************
+ * Static
+ **********************************************************************************************************************/
+
+namespace {
+
+Mutex                                           sCalculateSizeMutex;
+StaticAllocator<sizeof(DirIteratorStaticArray)> sCalculateSizeAllocator;
+
+} // namespace
+
+/***********************************************************************************************************************
  * DirIterator implementation
  **********************************************************************************************************************/
 
@@ -428,6 +439,45 @@ Error WriteStringToFile(const String& fileName, const String& text, uint32_t per
     const auto buff = Array<uint8_t>(reinterpret_cast<const uint8_t*>(text.Get()), text.Size());
 
     return WriteFile(fileName, buff, perm);
+}
+
+RetWithError<size_t> CalculateSize(const String& path)
+{
+    LockGuard lock {sCalculateSizeMutex};
+
+    size_t size         = 0;
+    auto   dirIterators = MakeUnique<DirIteratorStaticArray>(&sCalculateSizeAllocator);
+
+    if (auto err = dirIterators->EmplaceBack(path); !err.IsNone()) {
+        return {0, AOS_ERROR_WRAP(err)};
+    }
+
+    while (!dirIterators->IsEmpty()) {
+        auto& dirIt = dirIterators->Back();
+
+        while (dirIt.Next()) {
+            const auto fullPath = JoinPath(dirIt.GetRootPath(), dirIt->mPath);
+
+            if (dirIt->mIsDir) {
+                if (auto err = dirIterators->EmplaceBack(fullPath); !err.IsNone()) {
+                    return {0, AOS_ERROR_WRAP(err)};
+                }
+
+                continue;
+            }
+
+            struct stat st;
+            if (auto ret = stat(fullPath.CStr(), &st); ret != 0) {
+                return {0, AOS_ERROR_WRAP(Error(ret))};
+            }
+
+            size += st.st_size;
+        }
+
+        dirIterators->Erase(&dirIt);
+    }
+
+    return {size};
 }
 
 } // namespace aos::fs
