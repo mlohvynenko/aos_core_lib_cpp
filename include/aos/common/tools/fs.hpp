@@ -55,6 +55,13 @@ public:
     bool Next();
 
     /**
+     * Returns root path.
+     *
+     * @return String.
+     */
+    String GetRootPath() const { return mRoot; }
+
+    /**
      * Returns current entry reference.
      *
      * @return const Dir&.
