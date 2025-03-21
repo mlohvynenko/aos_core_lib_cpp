@@ -220,23 +220,23 @@ public:
 
         std::unique_lock lock {mMutex};
 
-        if (!mCondVar.wait_for(lock, cWaitTimeout, [&] { return mDataProvided; })) {
+        if (!mCondVar.wait_for(lock, cWaitTimeout, [&] { return !mNodeMonitoringData.empty(); })) {
             return ErrorEnum::eTimeout;
         }
 
-        mDataProvided = false;
+        auto release = DeferRelease(&mNodeMonitoringData, [](auto* data) { data->pop(); });
 
-        monitoringData.mCPU      = mNodeMonitoringData.mCPU;
-        monitoringData.mRAM      = mNodeMonitoringData.mRAM;
-        monitoringData.mDownload = mNodeMonitoringData.mDownload;
-        monitoringData.mUpload   = mNodeMonitoringData.mUpload;
+        monitoringData.mCPU      = mNodeMonitoringData.front().mCPU;
+        monitoringData.mRAM      = mNodeMonitoringData.front().mRAM;
+        monitoringData.mDownload = mNodeMonitoringData.front().mDownload;
+        monitoringData.mUpload   = mNodeMonitoringData.front().mUpload;
 
-        if (monitoringData.mPartitions.Size() != mNodeMonitoringData.mPartitions.Size()) {
+        if (monitoringData.mPartitions.Size() != mNodeMonitoringData.front().mPartitions.Size()) {
             return ErrorEnum::eInvalidArgument;
         }
 
         for (size_t i = 0; i < monitoringData.mPartitions.Size(); i++) {
-            monitoringData.mPartitions[i].mUsedSize = mNodeMonitoringData.mPartitions[i].mUsedSize;
+            monitoringData.mPartitions[i].mUsedSize = mNodeMonitoringData.front().mPartitions[i].mUsedSize;
         }
 
         return ErrorEnum::eNone;
@@ -244,12 +244,25 @@ public:
 
     Error GetInstanceMonitoringData(const String& instanceID, InstanceMonitoringData& instanceMonitoringData) override
     {
-        const auto it = mInstancesMonitoringData.Find(instanceID);
+        std::unique_lock lock {mMutex};
+
+        auto findData = [&instanceID](const auto& data) { return data.first == instanceID.CStr(); };
+
+        if (!mCondVar.wait_for(lock, cWaitTimeout, [&] {
+                return std::find_if(mInstancesMonitoringData.begin(), mInstancesMonitoringData.end(), findData)
+                    != mInstancesMonitoringData.end();
+            })) {
+            return ErrorEnum::eTimeout;
+        }
+
+        const auto it = std::find_if(mInstancesMonitoringData.begin(), mInstancesMonitoringData.end(), findData);
         if (it == mInstancesMonitoringData.end()) {
             return AOS_ERROR_WRAP(ErrorEnum::eNotFound);
         }
 
-        const auto& data = it->mSecond;
+        auto release = DeferRelease(&mInstancesMonitoringData, [&it](auto* data) { data->erase(it); });
+
+        const auto& data = it->second;
 
         instanceMonitoringData.mMonitoringData.mCPU      = data.mMonitoringData.mCPU;
         instanceMonitoringData.mMonitoringData.mRAM      = data.mMonitoringData.mRAM;
@@ -273,9 +286,23 @@ public:
     {
         std::lock_guard lock {mMutex};
 
-        mNodeMonitoringData = nodeMonitoringData;
-        mInstancesMonitoringData.Assign(instancesMonitoringData);
-        mDataProvided = true;
+        mNodeMonitoringData.push(nodeMonitoringData);
+
+        for (const auto& instanceData : instancesMonitoringData) {
+            mInstancesMonitoringData.push_back({instanceData.mFirst.CStr(), instanceData.mSecond});
+        }
+
+        mCondVar.notify_one();
+    }
+
+    void ProvideInitialInstancesData(const std::vector<std::string>& instanceIDs)
+    {
+        std::lock_guard lock {mMutex};
+
+        for (const auto& instanceID : instanceIDs) {
+            mInstancesMonitoringData.resize(mInstancesMonitoringData.size() + 1);
+            mInstancesMonitoringData.back().first = instanceID;
+        }
 
         mCondVar.notify_one();
     }
@@ -283,9 +310,8 @@ public:
 private:
     std::mutex                                                  mMutex;
     std::condition_variable                                     mCondVar;
-    bool                                                        mDataProvided = false;
-    MonitoringData                                              mNodeMonitoringData {};
-    StaticMap<String, InstanceMonitoringData, cMaxNumInstances> mInstancesMonitoringData {};
+    std::queue<MonitoringData>                                  mNodeMonitoringData {};
+    std::vector<std::pair<std::string, InstanceMonitoringData>> mInstancesMonitoringData {};
 };
 
 class MockSender : public SenderItf {
@@ -294,8 +320,7 @@ public:
     {
         std::lock_guard lock {mMutex};
 
-        mMonitoringData = monitoringData;
-        mDataSent       = true;
+        mMonitoringData.push(monitoringData);
 
         mCondVar.notify_one();
 
@@ -306,12 +331,12 @@ public:
     {
         std::unique_lock lock {mMutex};
 
-        if (!mCondVar.wait_for(lock, cWaitTimeout, [&] { return mDataSent; })) {
+        if (!mCondVar.wait_for(lock, cWaitTimeout, [&] { return !mMonitoringData.empty(); })) {
             return ErrorEnum::eTimeout;
         }
 
-        mDataSent      = false;
-        monitoringData = mMonitoringData;
+        monitoringData = mMonitoringData.front();
+        mMonitoringData.pop();
 
         return ErrorEnum::eNone;
     }
@@ -319,10 +344,9 @@ public:
 private:
     static constexpr auto cWaitTimeout = std::chrono::seconds {5};
 
-    std::mutex              mMutex;
-    std::condition_variable mCondVar;
-    bool                    mDataSent = false;
-    NodeMonitoringData      mMonitoringData {};
+    std::mutex                     mMutex;
+    std::condition_variable        mCondVar;
+    std::queue<NodeMonitoringData> mMonitoringData {};
 };
 
 class AlertSenderStub : public alerts::SenderItf {
@@ -466,6 +490,8 @@ TEST_F(MonitoringTest, GetNodeMonitoringData)
     SetInstancesMonitoringData(*providedNodeMonitoringData,
         Array<Pair<String, InstanceMonitoringData>>(instancesMonitoringData, ArraySize(instancesMonitoringData)));
 
+    resourceUsageProvider->ProvideInitialInstancesData({"instance0", "instance1"});
+
     EXPECT_TRUE(monitor->StartInstanceMonitoring("instance0", {instance0Ident, partitionParams, 0, 0, {}}).IsNone());
     EXPECT_TRUE(monitor->StartInstanceMonitoring("instance1", {instance1Ident, partitionParams, 0, 0, {}}).IsNone());
 
@@ -515,6 +541,8 @@ TEST_F(MonitoringTest, GetAverageMonitoringData)
     InstanceIdent  instance0Ident {"service0", "subject0", 0};
     PartitionParam partitionParmsData[] = {{"disk", ""}};
     auto           partitionParams      = Array<PartitionParam>(partitionParmsData, ArraySize(partitionParmsData));
+
+    resourceUsageProvider->ProvideInitialInstancesData({"instance0"});
 
     EXPECT_TRUE(monitor->StartInstanceMonitoring("instance0", {instance0Ident, partitionParams, 0, 0, {}}).IsNone());
 
@@ -630,7 +658,7 @@ TEST_F(MonitoringTest, QuotaAlertsAreSent)
                 .IsNone());
     }
 
-    Config config {Time::cMilliseconds, Time::cMilliseconds};
+    Config config {100 * Time::cMilliseconds, 100 * Time::cMilliseconds};
     auto   nodeInfoProvider      = std::make_unique<MockNodeInfoProvider>(nodeInfo);
     auto   resourceManager       = std::make_unique<MockResourceManager>(Optional<AlertRules> {alertRules});
     auto   resourceUsageProvider = std::make_unique<MockResourceUsageProvider>();
@@ -696,6 +724,8 @@ TEST_F(MonitoringTest, QuotaAlertsAreSent)
 
     SetInstancesMonitoringData(*providedNodeMonitoringData,
         Array<Pair<String, InstanceMonitoringData>>(instancesMonitoringData, ArraySize(instancesMonitoringData)));
+
+    resourceUsageProvider->ProvideInitialInstancesData({"instance0", "instance1"});
 
     EXPECT_TRUE(monitor
                     ->StartInstanceMonitoring(
@@ -812,6 +842,8 @@ TEST_F(MonitoringTest, GetNodeMonitoringDataOnInstanceSpikes)
 
     SetInstancesMonitoringData(*providedNodeMonitoringData,
         Array<Pair<String, InstanceMonitoringData>>(instancesMonitoringData, ArraySize(instancesMonitoringData)));
+
+    resourceUsageProvider->ProvideInitialInstancesData({"instance0", "instance1"});
 
     EXPECT_TRUE(monitor->StartInstanceMonitoring("instance0", {instance0Ident, partitionParams, 0, 0, {}}).IsNone());
     EXPECT_TRUE(monitor->StartInstanceMonitoring("instance1", {instance1Ident, partitionParams, 0, 0, {}}).IsNone());
