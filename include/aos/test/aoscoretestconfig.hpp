@@ -18,4 +18,14 @@
  */
 #define AOS_CONFIG_FS_FILE_PATH_LEN 512
 
+/**
+ * Max number of services.
+ */
+#define AOS_CONFIG_TYPES_MAX_NUM_SERVICES 8
+
+/**
+ * Max number of layers.
+ */
+#define AOS_CONFIG_TYPES_MAX_NUM_LAYERS 8
+
 #endif // AOSCORETESTCONFIG_HPP

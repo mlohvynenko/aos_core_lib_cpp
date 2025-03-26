@@ -9,6 +9,7 @@
 #define AOS_MONITORING_HPP_
 
 #include "aos/common/connectionsubsc.hpp"
+#include "aos/common/monitoring/alertprocessor.hpp"
 #include "aos/common/tools/error.hpp"
 #include "aos/common/tools/thread.hpp"
 #include "aos/common/types.hpp"
@@ -47,6 +48,23 @@ struct MonitoringData {
     bool operator!=(const MonitoringData& data) const { return !operator==(data); }
 };
 
+// Partition monitoring param.
+struct PartitionParam {
+    StaticString<cPartitionNameLen> mName;
+    StaticString<cFilePathLen>      mPath;
+};
+
+/**
+ * Instance resource monitor parameters.
+ */
+struct InstanceMonitorParams {
+    InstanceIdent                                  mInstanceIdent;
+    StaticArray<PartitionParam, cMaxNumPartitions> mPartitions;
+    uint32_t                                       mUID;
+    uint32_t                                       mGID;
+    Optional<AlertRules>                           mAlertRules;
+};
+
 /**
  * Instance monitoring data.
  */
@@ -60,6 +78,35 @@ struct InstanceMonitoringData {
      * Constructs a new Instance Monitoring Data object.
      *
      * @param instanceIdent instance ident.
+     */
+    explicit InstanceMonitoringData(const InstanceIdent& instanceIdent)
+        : mInstanceIdent(instanceIdent)
+    {
+    }
+
+    /**
+     * Constructs a new Instance Monitoring Data object.
+     *
+     * @param monitoringParams monitoring params.
+     */
+    explicit InstanceMonitoringData(const InstanceMonitorParams& monitoringParams)
+        : mInstanceIdent(monitoringParams.mInstanceIdent)
+        , mMonitoringData({0, 0, {}, 0, 0})
+        , mUID(monitoringParams.mUID)
+        , mGID(monitoringParams.mGID)
+    {
+        for (const auto& partition : monitoringParams.mPartitions) {
+            PartitionInfo partitionInfo = {partition.mName, {}, partition.mPath, 0, 0};
+
+            [[maybe_unused]] auto err = mMonitoringData.mPartitions.PushBack(partitionInfo);
+            assert(err.IsNone());
+        }
+    }
+
+    /**
+     * Constructs a new Instance Monitoring Data object.
+     *
+     * @param instanceIdent instance ident.
      * @param monitoringData monitoring data.
      */
     InstanceMonitoringData(const InstanceIdent& instanceIdent, const MonitoringData& monitoringData)
@@ -68,8 +115,11 @@ struct InstanceMonitoringData {
     {
     }
 
-    InstanceIdent  mInstanceIdent;
-    MonitoringData mMonitoringData;
+    InstanceIdent    mInstanceIdent  = {};
+    MonitoringData   mMonitoringData = {};
+    uint32_t         mUID            = 0;
+    uint32_t         mGID            = 0;
+    InstanceRunState mRunState       = InstanceRunStateEnum::eFailed;
 
     /**
      * Compares instance monitoring data.
@@ -79,7 +129,8 @@ struct InstanceMonitoringData {
      */
     bool operator==(const InstanceMonitoringData& data) const
     {
-        return mInstanceIdent == data.mInstanceIdent && mMonitoringData == data.mMonitoringData;
+        return mInstanceIdent == data.mInstanceIdent && mMonitoringData == data.mMonitoringData && mUID == data.mUID
+            && mGID == data.mGID;
     }
 
     /**
@@ -122,14 +173,6 @@ struct NodeMonitoringData {
 };
 
 /**
- * Instance resource monitor parameters.
- */
-struct InstanceMonitorParams {
-    InstanceIdent            mInstanceIdent;
-    PartitionInfoStaticArray mPartitions;
-};
-
-/**
  * Resource usage provider interface.
  */
 class ResourceUsageProviderItf {
@@ -152,10 +195,10 @@ public:
      * Returns instance monitoring data.
      *
      * @param instanceID instance ID.
-     * @param[out] monitoringData monitoring data.
+     * @param[out] monitoringData instance monitoring data.
      * @return Error.
      */
-    virtual Error GetInstanceMonitoringData(const String& instanceID, MonitoringData& monitoringData) = 0;
+    virtual Error GetInstanceMonitoringData(const String& instanceID, InstanceMonitoringData& monitoringData) = 0;
 };
 
 /**
@@ -190,6 +233,15 @@ public:
      * @return Error.
      */
     virtual Error StartInstanceMonitoring(const String& instanceID, const InstanceMonitorParams& monitoringConfig) = 0;
+
+    /**
+     * Updates instance's run state.
+     *
+     * @param instanceID instance ID.
+     * @param runState run state.
+     * @return Error.
+     */
+    virtual Error UpdateInstanceRunState(const String& instanceID, InstanceRunState runState) = 0;
 
     /**
      * Stops instance monitoring.

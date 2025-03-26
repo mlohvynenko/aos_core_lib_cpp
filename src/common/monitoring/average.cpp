@@ -63,7 +63,6 @@ Error Average::Init(const PartitionInfoStaticArray& nodeDisks, size_t windowCoun
 
 Error Average::Update(const NodeMonitoringData& data)
 {
-
     if (auto err
         = UpdateMonitoringData(mAverageNodeData.mMonitoringData, data.mMonitoringData, mAverageNodeData.mIsInitialized);
         !err.IsNone()) {
@@ -71,15 +70,15 @@ Error Average::Update(const NodeMonitoringData& data)
     }
 
     for (auto& instance : data.mServiceInstances) {
-        auto averageInstance = mAverageInstancesData.At(instance.mInstanceIdent);
-        if (!averageInstance.mError.IsNone()) {
+        auto averageInstance = mAverageInstancesData.Find(instance.mInstanceIdent);
+        if (averageInstance == mAverageInstancesData.end()) {
             LOG_ERR() << "Instance not found: instanceIdent=" << instance.mInstanceIdent;
 
-            return AOS_ERROR_WRAP(averageInstance.mError);
+            return AOS_ERROR_WRAP(ErrorEnum::eNotFound);
         }
 
-        if (auto err = UpdateMonitoringData(averageInstance.mValue.mMonitoringData, instance.mMonitoringData,
-                averageInstance.mValue.mIsInitialized);
+        if (auto err = UpdateMonitoringData(averageInstance->mSecond.mMonitoringData, instance.mMonitoringData,
+                averageInstance->mSecond.mIsInitialized);
             err.IsNone()) {
             return err;
         }
@@ -96,14 +95,13 @@ Error Average::GetData(NodeMonitoringData& data) const
 
     data.mServiceInstances.Clear();
 
-    // cppcheck-suppress unassignedVariable
     for (const auto& [instanceIdent, averageMonitoringData] : mAverageInstancesData) {
-        if (auto err = data.mServiceInstances.EmplaceBack(InstanceMonitoringData {instanceIdent, {}}); !err.IsNone()) {
+        if (auto err = data.mServiceInstances.EmplaceBack(instanceIdent); !err.IsNone()) {
             return AOS_ERROR_WRAP(err);
         }
 
-        if (auto err = GetMonitoringData(
-                data.mServiceInstances.Back().mValue.mMonitoringData, averageMonitoringData.mMonitoringData);
+        if (auto err
+            = GetMonitoringData(data.mServiceInstances.Back().mMonitoringData, averageMonitoringData.mMonitoringData);
             !err.IsNone()) {
             return err;
         }
@@ -114,14 +112,22 @@ Error Average::GetData(NodeMonitoringData& data) const
 
 Error Average::StartInstanceMonitoring(const InstanceMonitorParams& monitoringConfig)
 {
-    auto averageInstance = mAverageInstancesData.At(monitoringConfig.mInstanceIdent);
-    if (averageInstance.mError.IsNone()) {
+    auto averageInstance = mAverageInstancesData.Find(monitoringConfig.mInstanceIdent);
+    if (averageInstance != mAverageInstancesData.end()) {
         return AOS_ERROR_WRAP(Error(ErrorEnum::eAlreadyExist, "instance monitoring already started"));
     }
 
-    auto err = mAverageInstancesData.Emplace(monitoringConfig.mInstanceIdent,
-        AverageData {false, MonitoringData {0, 0, monitoringConfig.mPartitions, 0, 0}});
-    if (!err.IsNone()) {
+    auto averageData = MakeUnique<AverageData>(&mAllocator);
+
+    for (const auto& partition : monitoringConfig.mPartitions) {
+        if (auto err = averageData->mMonitoringData.mPartitions.PushBack(
+                PartitionInfo {partition.mName, {}, partition.mPath, 0, 0});
+            !err.IsNone()) {
+            return AOS_ERROR_WRAP(err);
+        }
+    }
+
+    if (auto err = mAverageInstancesData.Set(monitoringConfig.mInstanceIdent, *averageData); !err.IsNone()) {
         return AOS_ERROR_WRAP(err);
     }
 

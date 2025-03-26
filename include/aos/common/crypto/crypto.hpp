@@ -17,8 +17,7 @@
 #include "aos/common/tools/variant.hpp"
 #include "aos/common/types.hpp"
 
-namespace aos {
-namespace crypto {
+namespace aos::crypto {
 
 /**
  * Certificate issuer name max length.
@@ -198,17 +197,104 @@ public:
  */
 class HashType {
 public:
-    enum class Enum { eSHA1, eSHA224, eSHA256, eSHA384, eSHA512, eNone };
+    enum class Enum {
+        eSHA1,
+        eSHA224,
+        eSHA256,
+        eSHA384,
+        eSHA512,
+        eSHA3_256,
+        eNone,
+    };
 
     static const Array<const char* const> GetStrings()
     {
-        static const char* const sContentTypeStrings[] = {"NONE", "SHA1", "SHA224", "SHA256", "SHA384", "SHA512"};
+        static const char* const sContentTypeStrings[] = {
+            "SHA1",
+            "SHA224",
+            "SHA256",
+            "SHA384",
+            "SHA512",
+            "SHA3-256",
+            "NONE",
+        };
         return Array<const char* const>(sContentTypeStrings, ArraySize(sContentTypeStrings));
     };
 };
 
 using HashEnum = HashType::Enum;
 using Hash     = EnumStringer<HashType>;
+
+/**
+ * Hash interface.
+ */
+class HashItf {
+public:
+    /**
+     * Updates hash with input data.
+     *
+     * @param data input data.
+     * @return Error.
+     */
+    virtual Error Update(const Array<uint8_t>& data) = 0;
+
+    /**
+     * Finalizes hash calculation.
+     *
+     * @param[out] hash result hash.
+     * @return Error.
+     */
+    virtual Error Finalize(Array<uint8_t>& hash) = 0;
+
+    /**
+     * Destructor.
+     */
+    virtual ~HashItf() = default;
+};
+
+/**
+ * Hasher interface.
+ */
+class HasherItf {
+public:
+    /**
+     * Creates hash instance.
+     *
+     * @param algorithm hash algorithm.
+     * @return RetWithError<UniquePtr<HashItf>>.
+     */
+    virtual RetWithError<UniquePtr<HashItf>> CreateHash(Hash algorithm) = 0;
+
+    /**
+     * Destructor.
+     */
+    virtual ~HasherItf() = default;
+};
+
+class RandomItf {
+public:
+    /**
+     * Generates random integer value in range [0..maxValue].
+     *
+     * @param maxValue maximum value.
+     * @return RetWithError<uint64_t>.
+     */
+    virtual RetWithError<uint64_t> RandInt(uint64_t maxValue) = 0;
+
+    /**
+     * Generates random buffer.
+     *
+     * @param[out] buffer result buffer.
+     * @param size buffer size.
+     * @return Error.
+     */
+    virtual Error RandBuffer(Array<uint8_t>& buffer, size_t size = 0) = 0;
+
+    /**
+     * Destructor.
+     */
+    virtual ~RandomItf() = default;
+};
 
 /**
  * Options being used while signing.
@@ -405,6 +491,14 @@ struct Extension {
      */
     bool operator!=(const Extension& extension) const { return !operator==(extension); }
 };
+
+/**
+ * Converts input time to ASN1 GeneralizedTime string.
+ *
+ * @param time time.
+ * @return RetWithError<StaticString<cTimeStrLen>>
+ */
+RetWithError<StaticString<cTimeStrLen>> ConvertTimeToASN1Str(const Time& time);
 
 } // namespace asn1
 
@@ -627,7 +721,6 @@ public:
 using CertificateChain = StaticArray<Certificate, cCertChainSize>;
 
 } // namespace x509
-} // namespace crypto
-} // namespace aos
+} // namespace aos::crypto
 
 #endif

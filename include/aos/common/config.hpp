@@ -44,6 +44,13 @@
 #endif
 
 /**
+ * Max number of service providers.
+ */
+#ifndef AOS_CONFIG_TYPES_MAX_NUM_SERVICE_PROVIDERS
+#define AOS_CONFIG_TYPES_MAX_NUM_SERVICE_PROVIDERS 4
+#endif
+
+/**
  * Service ID len.
  */
 #ifndef AOS_CONFIG_TYPES_SERVICE_ID_LEN
@@ -117,21 +124,21 @@
  * Max number of services.
  */
 #ifndef AOS_CONFIG_TYPES_MAX_NUM_SERVICES
-#define AOS_CONFIG_TYPES_MAX_NUM_SERVICES 16
+#define AOS_CONFIG_TYPES_MAX_NUM_SERVICES 64
 #endif
 
 /**
  * Max number of layers.
  */
 #ifndef AOS_CONFIG_TYPES_MAX_NUM_LAYERS
-#define AOS_CONFIG_TYPES_MAX_NUM_LAYERS 16
+#define AOS_CONFIG_TYPES_MAX_NUM_LAYERS 64
 #endif
 
 /**
  * Max number of instances.
  */
 #ifndef AOS_CONFIG_TYPES_MAX_NUM_INSTANCES
-#define AOS_CONFIG_TYPES_MAX_NUM_INSTANCES 16
+#define AOS_CONFIG_TYPES_MAX_NUM_INSTANCES 256
 #endif
 
 /**
@@ -166,7 +173,7 @@
  * Max number of file system mount options.
  */
 #ifndef AOS_CONFIG_TYPES_MAX_NUM_FS_MOUNT_OPTIONS
-#define AOS_CONFIG_TYPES_MAX_NUM_FS_MOUNT_OPTIONS 4
+#define AOS_CONFIG_TYPES_MAX_NUM_FS_MOUNT_OPTIONS 8
 #endif
 
 /**
@@ -187,7 +194,7 @@
  * Protocol name len.
  */
 #ifndef AOS_CONFIG_TYPES_PROTOCOL_NAME_LEN
-#define AOS_CONFIG_TYPES_PROTOCOL_NAME_LEN 16
+#define AOS_CONFIG_TYPES_PROTOCOL_NAME_LEN 6
 #endif
 
 /**
@@ -205,17 +212,10 @@
 #endif
 
 /**
- * Max number of networks.
- */
-#ifndef AOS_CONFIG_TYPES_MAX_NUM_NETWORKS
-#define AOS_CONFIG_TYPES_MAX_NUM_NETWORKS 4
-#endif
-
-/**
  * Host name len.
  */
 #ifndef AOS_CONFIG_TYPES_HOST_NAME_LEN
-#define AOS_CONFIG_TYPES_HOST_NAME_LEN 48
+#define AOS_CONFIG_TYPES_HOST_NAME_LEN 128
 #endif
 
 /**
@@ -254,24 +254,38 @@
 #endif
 
 /**
+ * Max number of groups.
+ */
+#ifndef AOS_CONFIG_TYPES_MAX_NUM_GROUPS
+#define AOS_CONFIG_TYPES_MAX_NUM_GROUPS 32
+#endif
+
+/**
  * Max number of file system mounts.
  */
 #ifndef AOS_CONFIG_TYPES_MAX_NUM_FS_MOUNTS
-#define AOS_CONFIG_TYPES_MAX_NUM_FS_MOUNTS 4
+#define AOS_CONFIG_TYPES_MAX_NUM_FS_MOUNTS 16
 #endif
 
 /**
  * Environment variable name len.
  */
 #ifndef AOS_CONFIG_TYPES_ENV_VAR_NAME_LEN
-#define AOS_CONFIG_TYPES_ENV_VAR_NAME_LEN 32
+#define AOS_CONFIG_TYPES_ENV_VAR_NAME_LEN 64
+#endif
+
+/**
+ * Environment variable name len.
+ */
+#ifndef AOS_CONFIG_TYPES_ENV_VAR_VALUE_LEN
+#define AOS_CONFIG_TYPES_ENV_VAR_VALUE_LEN 256
 #endif
 
 /**
  * Max number of environment variables.
  */
 #ifndef AOS_CONFIG_TYPES_MAX_NUM_ENV_VARIABLES
-#define AOS_CONFIG_TYPES_MAX_NUM_ENV_VARIABLES 4
+#define AOS_CONFIG_TYPES_MAX_NUM_ENV_VARIABLES 16
 #endif
 
 /**
@@ -282,10 +296,10 @@
 #endif
 
 /**
- * Max number of devices.
+ * Max number of node's devices.
  */
-#ifndef AOS_CONFIG_TYPES_MAX_NUM_DEVICES
-#define AOS_CONFIG_TYPES_MAX_NUM_DEVICES 8
+#ifndef AOS_CONFIG_TYPES_MAX_NUM_NODE_DEVICES
+#define AOS_CONFIG_TYPES_MAX_NUM_NODE_DEVICES 8
 #endif
 
 /**
@@ -299,7 +313,7 @@
  * Label name len.
  */
 #ifndef AOS_CONFIG_TYPES_LABEL_NAME_LEN
-#define AOS_CONFIG_TYPES_LABEL_NAME_LEN 16
+#define AOS_CONFIG_TYPES_LABEL_NAME_LEN 64
 #endif
 
 /**
@@ -426,6 +440,83 @@
  */
 #ifndef AOS_CONFIG_TYPES_VERSION_LEN
 #define AOS_CONFIG_TYPES_VERSION_LEN 32
+#endif
+
+/**
+ * Max subnet length.
+ */
+#ifndef AOS_CONFIG_TYPES_SUBNET_LEN
+#define AOS_CONFIG_TYPES_SUBNET_LEN 50
+#endif
+
+/**
+ * Max MAC length.
+ */
+#ifndef AOS_CONFIG_TYPES_MAC_LEN
+#define AOS_CONFIG_TYPES_MAC_LEN 18
+#endif
+
+/**
+ * Max iptables chain name length.
+ */
+#ifndef AOS_CONFIG_TYPES_IPTABLES_CHAIN_LEN
+#define AOS_CONFIG_TYPES_IPTABLES_CHAIN_LEN 64
+#endif
+
+/**
+ * Max CNI interface name length.
+ */
+#ifndef AOS_CONFIG_TYPES_INTERFACE_NAME_LEN
+#define AOS_CONFIG_TYPES_INTERFACE_NAME_LEN 64
+#endif
+
+/**
+ * Max num runners.
+ */
+#ifndef AOS_CONFIG_TYPES_MAX_NUM_RUNNERS
+#define AOS_CONFIG_TYPES_MAX_NUM_RUNNERS 4
+#endif
+
+/**
+ * Runner name max length.
+ */
+#ifndef AOS_CONFIG_TYPES_RUNNER_NAME_LEN
+#define AOS_CONFIG_TYPES_RUNNER_NAME_LEN 16
+#endif
+
+/**
+ * Function name length.
+ */
+#ifndef AOS_CONFIG_TYPES_FUNCTION_LEN
+#define AOS_CONFIG_TYPES_FUNCTION_LEN 32
+#endif
+
+/**
+ * Permissions length.
+ */
+#ifndef AOS_CONFIG_TYPES_PERMISSIONS_LEN
+#define AOS_CONFIG_TYPES_PERMISSIONS_LEN 32
+#endif
+
+/**
+ * Maximum number of functions for functional service.
+ */
+#ifndef AOS_CONFIG_TYPES_FUNCTIONS_MAX_COUNT
+#define AOS_CONFIG_TYPES_FUNCTIONS_MAX_COUNT 32
+#endif
+
+/**
+ * Functional service name length.
+ */
+#ifndef AOS_CONFIG_TYPES_FUNC_SERVICE_LEN
+#define AOS_CONFIG_TYPES_FUNC_SERVICE_LEN 32
+#endif
+
+/**
+ * Maximum number of functional services.
+ */
+#ifndef AOS_CONFIG_TYPES_FUNC_SERVICE_MAX_COUNT
+#define AOS_CONFIG_TYPES_FUNC_SERVICE_MAX_COUNT 16
 #endif
 
 /**
@@ -663,6 +754,13 @@
 #endif
 
 /**
+ * Maximum number of hasher instances to be allocated by cryptoprovider.
+ */
+#ifndef AOS_CONFIG_CRYPTO_HASHER_COUNT
+#define AOS_CONFIG_CRYPTO_HASHER_COUNT 32
+#endif
+
+/**
  * Maximum length of PKCS11 slot description.
  */
 #ifndef AOS_CONFIG_PKCS11_SLOT_DESCRIPTION_LEN
@@ -785,7 +883,14 @@
  * Spec parameter max count.
  */
 #ifndef AOS_CONFIG_OCISPEC_MAX_SPEC_PARAM_COUNT
-#define AOS_CONFIG_OCISPEC_MAX_SPEC_PARAM_COUNT 8
+#define AOS_CONFIG_OCISPEC_MAX_SPEC_PARAM_COUNT 16
+#endif
+
+/**
+ * Max device type len.
+ */
+#ifndef AOS_CONFIG_OCISPEC_DEV_TYPE_LEN
+#define AOS_CONFIG_OCISPEC_DEV_TYPE_LEN 32
 #endif
 
 /**
@@ -817,66 +922,101 @@
 #endif
 
 /**
+ * Author len.
+ */
+#ifndef AOS_CONFIG_OCISPEC_AUTHOR_LEN
+#define AOS_CONFIG_OCISPEC_AUTHOR_LEN 64
+#endif
+
+/**
+ * Balancing policy len.
+ */
+#ifndef AOS_CONFIG_OCISPEC_BALANCING_POLICY_LEN
+#define AOS_CONFIG_OCISPEC_BALANCING_POLICY_LEN 32
+#endif
+
+/**
+ * Max sysctl name len.
+ */
+#ifndef AOS_CONFIG_OCISPEC_SYSCTL_LEN
+#define AOS_CONFIG_OCISPEC_SYSCTL_LEN 32
+#endif
+
+/**
+ * Max sysctl count.
+ */
+#ifndef AOS_CONFIG_OCISPEC_SYSCTL_MAX_COUNT
+#define AOS_CONFIG_OCISPEC_SYSCTL_MAX_COUNT 32
+#endif
+
+/**
+ * User name len.
+ */
+#ifndef AOS_CONFIG_OCISPEC_USER_NAME_LEN
+#define AOS_CONFIG_OCISPEC_USER_NAME_LEN 64
+#endif
+
+/**
  * Alert message len.
  */
-#ifndef AOS_CONFIG_CLOUD_PROTOCOL_ALERT_MESSAGE_LEN
-#define AOS_CONFIG_CLOUD_PROTOCOL_ALERT_MESSAGE_LEN 128
+#ifndef AOS_CONFIG_CLOUDPROTOCOL_ALERT_MESSAGE_LEN
+#define AOS_CONFIG_CLOUDPROTOCOL_ALERT_MESSAGE_LEN 128
 #endif
 
 /**
  * Alert download target id len.
  */
-#ifndef AOS_CONFIG_CLOUD_PROTOCOL_ALERT_CORE_DOWNLOAD_TARGET_ID_LEN
-#define AOS_CONFIG_CLOUD_PROTOCOL_ALERT_CORE_DOWNLOAD_TARGET_ID_LEN 64
+#ifndef AOS_CONFIG_CLOUDPROTOCOL_ALERT_CORE_DOWNLOAD_TARGET_ID_LEN
+#define AOS_CONFIG_CLOUDPROTOCOL_ALERT_CORE_DOWNLOAD_TARGET_ID_LEN 64
 #endif
 
 /**
  * Alert download progress len.
  */
-#ifndef AOS_CONFIG_CLOUD_PROTOCOL_ALERT_DOWNLOAD_PROGRESS_LEN
-#define AOS_CONFIG_CLOUD_PROTOCOL_ALERT_DOWNLOAD_PROGRESS_LEN 64
+#ifndef AOS_CONFIG_CLOUDPROTOCOL_ALERT_DOWNLOAD_PROGRESS_LEN
+#define AOS_CONFIG_CLOUDPROTOCOL_ALERT_DOWNLOAD_PROGRESS_LEN 64
 #endif
 
 /**
  * Alert parameter len.
  */
-#ifndef AOS_CONFIG_CLOUD_PROTOCOL_ALERT_PARAMETER_LEN
-#define AOS_CONFIG_CLOUD_PROTOCOL_ALERT_PARAMETER_LEN 16
+#ifndef AOS_CONFIG_CLOUDPROTOCOL_ALERT_PARAMETER_LEN
+#define AOS_CONFIG_CLOUDPROTOCOL_ALERT_PARAMETER_LEN 16
 #endif
 
 /**
  * Resource alert errors size.
  */
-#ifndef AOS_CONFIG_CLOUD_PROTOCOL_ALERT_RESOURCE_ERRORS_SIZE
-#define AOS_CONFIG_CLOUD_PROTOCOL_ALERT_RESOURCE_ERRORS_SIZE 4
+#ifndef AOS_CONFIG_CLOUDPROTOCOL_ALERT_RESOURCE_ERRORS_SIZE
+#define AOS_CONFIG_CLOUDPROTOCOL_ALERT_RESOURCE_ERRORS_SIZE 4
 #endif
 
 /**
  * Environment variable name value.
  */
-#ifndef AOS_CONFIG_CLOUD_PROTOCOL_ENV_VAR_VALUE_LEN
-#define AOS_CONFIG_CLOUD_PROTOCOL_ENV_VAR_VALUE_LEN 32
+#ifndef AOS_CONFIG_CLOUDPROTOCOL_ENV_VAR_VALUE_LEN
+#define AOS_CONFIG_CLOUDPROTOCOL_ENV_VAR_VALUE_LEN 32
 #endif
 
 /**
  * Log id len.
  */
-#ifndef AOS_CONFIG_CLOUD_PROTOCOL_LOG_ID_LEN
-#define AOS_CONFIG_CLOUD_PROTOCOL_LOG_ID_LEN 64
+#ifndef AOS_CONFIG_CLOUDPROTOCOL_LOG_ID_LEN
+#define AOS_CONFIG_CLOUDPROTOCOL_LOG_ID_LEN 64
 #endif
 
 /**
  * Log content len.
  */
-#ifndef AOS_CONFIG_CLOUD_PROTOCOL_LOG_CONTENT_LEN
-#define AOS_CONFIG_CLOUD_PROTOCOL_LOG_CONTENT_LEN 256
+#ifndef AOS_CONFIG_CLOUDPROTOCOL_LOG_CONTENT_LEN
+#define AOS_CONFIG_CLOUDPROTOCOL_LOG_CONTENT_LEN 256 * 1024
 #endif
 
 /**
  * Bearer token len.
  */
-#ifndef AOS_CONFIG_CLOUD_PROTOCOL_BEARER_TOKEN_LEN
-#define AOS_CONFIG_CLOUD_PROTOCOL_BEARER_TOKEN_LEN 256
+#ifndef AOS_CONFIG_CLOUDPROTOCOL_BEARER_TOKEN_LEN
+#define AOS_CONFIG_CLOUDPROTOCOL_BEARER_TOKEN_LEN 256
 #endif
 
 #endif

@@ -10,9 +10,9 @@
 #include "aos/iam/certmodules/certmodule.hpp"
 
 #include "aos/test/log.hpp"
-#include "mocks/hsmmock.hpp"
-#include "mocks/x509providermock.hpp"
-#include "storagestub.hpp"
+#include "mocks/certhandlermock.hpp"
+#include "mocks/cryptomock.hpp"
+#include "stubs/certhandlerstub.hpp"
 
 using namespace aos;
 using namespace aos::iam::certhandler;
@@ -29,7 +29,7 @@ protected:
 
     void SetUp() override
     {
-        aos::InitLog();
+        aos::test::InitLog();
 
         mModuleConfig.mMaxCertificates = 2;
 
@@ -39,10 +39,10 @@ protected:
 
     CertInfo mCertInfo;
 
-    ModuleConfig    mModuleConfig;
-    ProviderItfMock mX509Provider;
-    HSMItfMock      mHSM;
-    StorageStub     mStorage;
+    ModuleConfig               mModuleConfig;
+    crypto::x509::ProviderMock mX509Provider;
+    HSMMock                    mHSM;
+    StorageStub                mStorage;
 };
 
 /***********************************************************************************************************************

@@ -47,21 +47,21 @@
  * Use minimal stack size PTHREAD_STACK_MIN.
  */
 #ifndef AOS_CONFIG_THREAD_DEFAULT_STACK_SIZE
-#define AOS_CONFIG_THREAD_DEFAULT_STACK_SIZE 16384
+#define AOS_CONFIG_THREAD_DEFAULT_STACK_SIZE 0
 #endif
 
 /**
  * Configures thread stack alignment.
  */
 #ifndef AOS_CONFIG_THREAD_STACK_ALIGN
-#define AOS_CONFIG_THREAD_STACK_ALIGN 4096
+#define AOS_CONFIG_THREAD_STACK_ALIGN 0
 #endif
 
 /**
  * Configures thread stack guard size.
  */
 #ifndef AOS_CONFIG_THREAD_STACK_GUARD_SIZE
-#define AOS_CONFIG_THREAD_STACK_GUARD_SIZE 0
+#define AOS_CONFIG_THREAD_STACK_GUARD_SIZE 4096
 #endif
 
 /**

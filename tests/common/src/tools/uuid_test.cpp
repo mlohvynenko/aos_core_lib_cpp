@@ -12,8 +12,7 @@
 
 #include "aos/common/tools/uuid.hpp"
 
-namespace aos {
-namespace uuid {
+namespace aos::uuid {
 
 TEST(UUIDTest, CreateUUID)
 {
@@ -26,15 +25,9 @@ TEST(UUIDTest, CreateUUID)
 
         ASSERT_EQ(tmp.Size(), tmp.MaxSize());
 
+        ASSERT_EQ(std::find(uuids.begin(), uuids.end(), tmp), uuids.end());
+
         uuids.push_back(tmp);
-    }
-
-    UUID prevUUID;
-    std::sort(uuids.begin(), uuids.end());
-
-    for (const auto& cur : uuids) {
-        ASSERT_NE(prevUUID, cur);
-        prevUUID = cur;
     }
 }
 
@@ -77,5 +70,4 @@ TEST(UUIDTest, TreatEmptyUUIDValid)
     EXPECT_EQ(result, Array<uint8_t>(expected, uuid::cUUIDSize));
 }
 
-} // namespace uuid
-} // namespace aos
+} // namespace aos::uuid

@@ -57,6 +57,13 @@ TEST(StringTest, Basic)
 
     EXPECT_EQ(str, "test1test2");
 
+    // Test prepend
+
+    str = "string";
+    str.Prepend("test");
+
+    EXPECT_EQ(str, "teststring");
+
     StaticString<4> convertStr;
 
     // Convert to int
@@ -148,6 +155,20 @@ TEST(StringTest, StringArray)
 
     EXPECT_EQ(strArray[0].str1, "test1");
     EXPECT_EQ(strArray[0].str2, "test2");
+}
+
+TEST(StringTest, Assign)
+{
+    const String cString = "Hello World!";
+
+    StaticString<12> str;
+
+    ASSERT_EQ(str.Assign(cString), ErrorEnum::eNone);
+    EXPECT_EQ(str, cString);
+
+    StaticString<1> str2;
+    ASSERT_EQ(str2.Assign(cString), ErrorEnum::eNoMemory);
+    ASSERT_TRUE(str2.IsEmpty());
 }
 
 TEST(StringTest, Split)
@@ -343,4 +364,51 @@ TEST(StringTest, FindAny)
     Tie(pos, err) = str.FindAny(0, "a");
     ASSERT_FALSE(err.IsNone());
     EXPECT_EQ(pos, str.Size());
+}
+
+TEST(StringTest, Rebind)
+{
+    String str1;
+    String str2("Hello World!");
+
+    str1.Rebind(str2);
+
+    EXPECT_EQ(str1, str2);
+}
+
+TEST(StringTest, ToLower)
+{
+    StaticString<100> str = "Hello World!";
+
+    str.ToLower();
+
+    EXPECT_EQ(str, "hello world!");
+}
+
+TEST(StringTest, ToUpper)
+{
+    StaticString<100> str = "Hello World!";
+
+    str.ToUpper();
+
+    EXPECT_EQ(str, "HELLO WORLD!");
+}
+
+TEST(StringTest, Replace)
+{
+    StaticString<100> str = "Hello World!";
+
+    auto err = str.Replace("World", "Universe");
+    EXPECT_TRUE(err.IsNone());
+    EXPECT_EQ(str, "Hello Universe!");
+
+    err = str.Replace("Hello", "Hi");
+    EXPECT_TRUE(err.IsNone());
+    EXPECT_EQ(str, "Hi Universe!");
+
+    str.Append(" ").Append("Goodbye Universe!");
+
+    err = str.Replace("Universe", "Aos", 1);
+    EXPECT_TRUE(err.IsNone());
+    EXPECT_EQ(str, "Hi Aos! Goodbye Universe!");
 }

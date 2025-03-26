@@ -10,13 +10,7 @@
 #include "aos/common/cloudprotocol/cloudprotocol.hpp"
 #include "aos/common/types.hpp"
 
-namespace aos {
-namespace cloudprotocol {
-
-/**
- * Environment variable name value.
- */
-constexpr auto cEnvVarValueLen = AOS_CONFIG_CLOUD_PROTOCOL_ENV_VAR_VALUE_LEN;
+namespace aos::cloudprotocol {
 
 /**
  * Environment variable info.
@@ -46,6 +40,9 @@ struct EnvVarInfo {
     bool operator!=(const EnvVarInfo& info) const { return !operator==(info); }
 };
 
+/**
+ * Env vars info static array.
+ */
 using EnvVarInfoArray = StaticArray<EnvVarInfo, cMaxNumEnvVariables>;
 
 /**
@@ -54,6 +51,23 @@ using EnvVarInfoArray = StaticArray<EnvVarInfo, cMaxNumEnvVariables>;
 struct EnvVarsInstanceInfo {
     InstanceFilter  mFilter;
     EnvVarInfoArray mVariables;
+
+    /**
+     * Default constructor.
+     */
+    EnvVarsInstanceInfo() = default;
+
+    /**
+     * Creates environment variable instance info.
+     *
+     * @param filter instance filter.
+     * @param variables environment variables.
+     */
+    EnvVarsInstanceInfo(const InstanceFilter& filter, const Array<EnvVarInfo>& variables)
+        : mFilter(filter)
+        , mVariables(variables)
+    {
+    }
 
     /**
      * Compares environment variable instance info.
@@ -111,6 +125,23 @@ struct EnvVarsInstanceStatus {
     EnvVarStatusArray mStatuses;
 
     /**
+     * Default constructor.
+     */
+    EnvVarsInstanceStatus() = default;
+
+    /**
+     * Creates environment variable instance status.
+     *
+     * @param filter instance filter.
+     * @param statuses environment variable statuses.
+     */
+    EnvVarsInstanceStatus(const InstanceFilter& filter, const Array<EnvVarStatus>& statuses)
+        : mFilter(filter)
+        , mStatuses(statuses)
+    {
+    }
+
+    /**
      * Compares environment variable instance status.
      *
      * @param status environment variable instance status to compare with.
@@ -132,7 +163,6 @@ struct EnvVarsInstanceStatus {
 
 using EnvVarsInstanceStatusArray = StaticArray<EnvVarsInstanceStatus, cMaxNumInstances>;
 
-} // namespace cloudprotocol
-} // namespace aos
+} // namespace aos::cloudprotocol
 
 #endif

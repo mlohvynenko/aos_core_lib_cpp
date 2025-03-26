@@ -21,6 +21,21 @@ static void TakeSharedPtr(SharedPtr<uint32_t> shPtr)
     EXPECT_TRUE(shPtr);
 }
 
+namespace {
+class BaseClass {
+public:
+    BaseClass() {};
+    virtual ~BaseClass() {};
+};
+
+class NewClass : public BaseClass {
+public:
+    NewClass() {};
+    virtual ~NewClass() {};
+};
+
+}; // namespace
+
 TEST(MemoryTest, UniquePtr)
 {
     StaticAllocator<256> allocator;
@@ -30,6 +45,25 @@ TEST(MemoryTest, UniquePtr)
     {
         UniquePtr<uint32_t> uPtr = MakeUnique<uint32_t>(&allocator, 0);
         EXPECT_EQ(allocator.FreeSize(), allocator.MaxSize() - sizeof(uint32_t));
+    }
+
+    EXPECT_EQ(allocator.FreeSize(), allocator.MaxSize());
+
+    // Construct with allocator
+
+    {
+        UniquePtr<uint32_t> uPtr(new (&allocator) uint32_t(), &allocator);
+        EXPECT_EQ(allocator.FreeSize(), allocator.MaxSize() - sizeof(uint32_t));
+    }
+
+    EXPECT_EQ(allocator.FreeSize(), allocator.MaxSize());
+
+    // Construct with deleter
+
+    {
+        auto deleter = [&allocator](uint32_t* ptr) { allocator.Free(ptr); };
+
+        UniquePtr<uint32_t, decltype(deleter)> uPtr(new (&allocator) uint32_t(), Move(deleter));
     }
 
     EXPECT_EQ(allocator.FreeSize(), allocator.MaxSize());
@@ -111,20 +145,29 @@ TEST(MemoryTest, SharedPtr)
     EXPECT_EQ(allocator.FreeSize(), allocator.MaxSize());
 }
 
+TEST(MemoryTest, UniquePtrDerivedClass)
+{
+    StaticAllocator<256> allocator;
+
+    {
+        UniquePtr<BaseClass> basePtr;
+
+        {
+            auto newPtr = MakeUnique<NewClass>(&allocator);
+
+            EXPECT_EQ(allocator.FreeSize(), allocator.MaxSize() - sizeof(NewClass));
+
+            basePtr = Move(newPtr);
+        }
+
+        EXPECT_EQ(allocator.FreeSize(), allocator.MaxSize() - sizeof(NewClass));
+    }
+
+    EXPECT_EQ(allocator.FreeSize(), allocator.MaxSize());
+}
+
 TEST(MemoryTest, SharedPtrDerivedClass)
 {
-    class BaseClass {
-    public:
-        BaseClass() {};
-        virtual ~BaseClass() {};
-    };
-
-    class NewClass : public BaseClass {
-    public:
-        NewClass() {};
-        virtual ~NewClass() {};
-    };
-
     StaticAllocator<256> allocator;
 
     {

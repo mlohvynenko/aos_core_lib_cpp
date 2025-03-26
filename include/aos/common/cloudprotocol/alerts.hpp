@@ -7,36 +7,36 @@
 #ifndef AOS_CLOUDPROTOCOL_ALERTS_HPP_
 #define AOS_CLOUDPROTOCOL_ALERTS_HPP_
 
+#include "aos/common/tools/log.hpp"
 #include "aos/common/tools/variant.hpp"
 #include "aos/common/types.hpp"
 
-namespace aos {
-namespace cloudprotocol {
+namespace aos::cloudprotocol {
 
 /**
  * Alert message len.
  */
-constexpr auto cAlertMessageLen = AOS_CONFIG_CLOUD_PROTOCOL_ALERT_MESSAGE_LEN;
+constexpr auto cAlertMessageLen = AOS_CONFIG_CLOUDPROTOCOL_ALERT_MESSAGE_LEN;
 
 /**
  * Alert download target id len.
  */
-constexpr auto cAlertDownloadTargetIDLen = AOS_CONFIG_CLOUD_PROTOCOL_ALERT_CORE_DOWNLOAD_TARGET_ID_LEN;
+constexpr auto cAlertDownloadTargetIDLen = AOS_CONFIG_CLOUDPROTOCOL_ALERT_CORE_DOWNLOAD_TARGET_ID_LEN;
 
 /**
  * Alert download progress len.
  */
-constexpr auto cAlertDownloadProgressLen = AOS_CONFIG_CLOUD_PROTOCOL_ALERT_DOWNLOAD_PROGRESS_LEN;
+constexpr auto cAlertDownloadProgressLen = AOS_CONFIG_CLOUDPROTOCOL_ALERT_DOWNLOAD_PROGRESS_LEN;
 
 /**
  * Alert parameter len.
  */
-constexpr auto cAlertParameterLen = AOS_CONFIG_CLOUD_PROTOCOL_ALERT_PARAMETER_LEN;
+constexpr auto cAlertParameterLen = AOS_CONFIG_CLOUDPROTOCOL_ALERT_PARAMETER_LEN;
 
 /**
  * Resource alert errors size.
  */
-constexpr auto cAlertResourceErrorsSize = AOS_CONFIG_CLOUD_PROTOCOL_ALERT_RESOURCE_ERRORS_SIZE;
+constexpr auto cAlertResourceErrorsSize = AOS_CONFIG_CLOUDPROTOCOL_ALERT_RESOURCE_ERRORS_SIZE;
 
 /**
  * Alert tag.
@@ -108,6 +108,16 @@ struct AlertItem {
      * @return bool.
      */
     bool operator!=(const AlertItem& item) const { return !operator==(item); }
+
+    /**
+     * Outputs alert item to log.
+     *
+     * @param log log to output.
+     * @param alert alert.
+     *
+     * @return Log&.
+     */
+    friend Log& operator<<(Log& log, const AlertItem& alert) { return log << alert.mTimestamp << ":" << alert.mTag; }
 };
 
 /**
@@ -142,6 +152,20 @@ struct SystemAlert : AlertItem {
      * @return bool.
      */
     bool operator!=(const SystemAlert& alert) const { return !operator==(alert); }
+
+    /**
+     * Outputs system alert to log.
+     *
+     * @param log log to output.
+     * @param alert alert.
+     *
+     * @return Log&.
+     */
+    friend Log& operator<<(Log& log, const SystemAlert& alert)
+    {
+        return log << "{" << static_cast<const AlertItem&>(alert) << ":" << alert.mNodeID << ":" << alert.mMessage
+                   << "}";
+    }
 };
 
 /**
@@ -210,6 +234,20 @@ struct CoreAlert : AlertItem {
      * @return bool.
      */
     bool operator!=(const CoreAlert& alert) const { return !operator==(alert); }
+
+    /**
+     * Outputs core alert to log.
+     *
+     * @param log log to output.
+     * @param alert alert.
+     *
+     * @return Log&.
+     */
+    friend Log& operator<<(Log& log, const CoreAlert& alert)
+    {
+        return log << "{" << static_cast<const AlertItem&>(alert) << ":" << alert.mNodeID << ":" << alert.mCoreComponent
+                   << ":" << alert.mMessage << "}";
+    }
 };
 
 /**
@@ -280,6 +318,20 @@ struct DownloadAlert : AlertItem {
      * @return bool.
      */
     bool operator!=(const DownloadAlert& alert) const { return !operator==(alert); }
+
+    /**
+     * Outputs download alert to log.
+     *
+     * @param log log to output.
+     * @param alert alert.
+     *
+     * @return Log&.
+     */
+    friend Log& operator<<(Log& log, const DownloadAlert& alert)
+    {
+        return log << "{" << static_cast<const AlertItem&>(alert) << ":" << alert.mTargetType << ":" << alert.mURL
+                   << ":" << alert.mMessage << "}";
+    }
 };
 
 /**
@@ -319,6 +371,10 @@ struct SystemQuotaAlert : AlertItem {
      */
     SystemQuotaAlert(const Time& timestamp = Time::Now())
         : AlertItem(AlertTagEnum::eSystemQuotaAlert, timestamp)
+        , mNodeID()
+        , mParameter()
+        , mValue(0)
+        , mStatus()
     {
     }
 
@@ -346,6 +402,20 @@ struct SystemQuotaAlert : AlertItem {
      * @return bool.
      */
     bool operator!=(const SystemQuotaAlert& alert) const { return !operator==(alert); }
+
+    /**
+     * Outputs system quota alert to log.
+     *
+     * @param log log to output.
+     * @param alert alert.
+     *
+     * @return Log&.
+     */
+    friend Log& operator<<(Log& log, const SystemQuotaAlert& alert)
+    {
+        return log << "{" << static_cast<const AlertItem&>(alert) << ":" << alert.mNodeID << ":" << alert.mParameter
+                   << ":" << alert.mValue << ":" << alert.mStatus << "}";
+    }
 };
 
 /**
@@ -359,6 +429,10 @@ struct InstanceQuotaAlert : AlertItem {
      */
     InstanceQuotaAlert(const Time& timestamp = Time::Now())
         : AlertItem(AlertTagEnum::eInstanceQuotaAlert, timestamp)
+        , mInstanceIdent()
+        , mParameter()
+        , mValue(0)
+        , mStatus()
     {
     }
 
@@ -386,6 +460,20 @@ struct InstanceQuotaAlert : AlertItem {
      * @return bool.
      */
     bool operator!=(const InstanceQuotaAlert& alert) const { return !operator==(alert); }
+
+    /**
+     * Outputs instance quota alert to log.
+     *
+     * @param log log to output.
+     * @param alert alert.
+     *
+     * @return Log&.
+     */
+    friend Log& operator<<(Log& log, const InstanceQuotaAlert& alert)
+    {
+        return log << "{" << static_cast<const AlertItem&>(alert) << ":" << alert.mParameter << ":" << alert.mValue
+                   << ":" << alert.mStatus << "}";
+    }
 };
 
 /**
@@ -399,6 +487,7 @@ struct DeviceAllocateAlert : AlertItem {
      */
     DeviceAllocateAlert(const Time& timestamp = Time::Now())
         : AlertItem(AlertTagEnum::eDeviceAllocateAlert, timestamp)
+        , mInstanceIdent()
     {
     }
 
@@ -426,6 +515,20 @@ struct DeviceAllocateAlert : AlertItem {
      * @return bool.
      */
     bool operator!=(const DeviceAllocateAlert& alert) const { return !operator==(alert); }
+
+    /**
+     * Outputs device allocate alert to log.
+     *
+     * @param log log to output.
+     * @param alert alert.
+     *
+     * @return Log&.
+     */
+    friend Log& operator<<(Log& log, const DeviceAllocateAlert& alert)
+    {
+        return log << "{" << static_cast<const AlertItem&>(alert) << ":" << alert.mInstanceIdent << ":" << alert.mNodeID
+                   << ":" << alert.mDevice << ":" << alert.mMessage << "}";
+    }
 };
 
 /**
@@ -464,6 +567,25 @@ struct ResourceValidateAlert : AlertItem {
      * @return bool.
      */
     bool operator!=(const ResourceValidateAlert& alert) const { return !operator==(alert); }
+
+    /**
+     * Outputs resource validate alert to log.
+     *
+     * @param log log to output.
+     * @param alert alert.
+     *
+     * @return Log&.
+     */
+    friend Log& operator<<(Log& log, const ResourceValidateAlert& alert)
+    {
+        log << "{" << static_cast<const AlertItem&>(alert) << ":" << alert.mNodeID << ":" << alert.mName;
+
+        for (const auto& error : alert.mErrors) {
+            log << ":" << error;
+        }
+
+        return log << "}";
+    }
 };
 
 /**
@@ -477,6 +599,7 @@ struct ServiceInstanceAlert : AlertItem {
      */
     ServiceInstanceAlert(const Time& timestamp = Time::Now())
         : AlertItem(AlertTagEnum::eServiceInstanceAlert, timestamp)
+        , mInstanceIdent()
     {
     }
 
@@ -503,12 +626,25 @@ struct ServiceInstanceAlert : AlertItem {
      * @return bool.
      */
     bool operator!=(const ServiceInstanceAlert& alert) const { return !operator==(alert); }
+
+    /**
+     * Outputs service instance alert to log.
+     *
+     * @param log log to output.
+     * @param alert alert.
+     *
+     * @return Log&.
+     */
+    friend Log& operator<<(Log& log, const ServiceInstanceAlert& alert)
+    {
+        return log << "{" << static_cast<const AlertItem&>(alert) << ":" << alert.mInstanceIdent << ":"
+                   << alert.mServiceVersion << ":" << alert.mMessage << "}";
+    }
 };
 
 using AlertVariant = Variant<SystemAlert, CoreAlert, DownloadAlert, SystemQuotaAlert, InstanceQuotaAlert,
     DeviceAllocateAlert, ResourceValidateAlert, ServiceInstanceAlert>;
 
-} // namespace cloudprotocol
-} // namespace aos
+} // namespace aos::cloudprotocol
 
 #endif

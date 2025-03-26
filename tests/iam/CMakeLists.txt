@@ -12,14 +12,15 @@ set(TARGET aosiamcpp_test)
 # ######################################################################################################################
 
 set(SOURCES
-    iam_test.cpp
     certmodules/certmodules_test.cpp
-    stubs/storagestub.cpp
+    certprovider/certprovider_test.cpp
     identmodules/fileidentifier_test.cpp
     nodeinfoprovider/nodeinfoprovider_test.cpp
+    nodemanager/nodemanager_test.cpp
     permhandler/permhandler_test.cpp
     provisionmanager/provisionmanager_test.cpp
-    nodemanager/nodemanager_test.cpp
+    stubs/certhandlerstub.cpp
+    iam_test.cpp
 )
 
 # ######################################################################################################################
@@ -27,7 +28,7 @@ set(SOURCES
 # ######################################################################################################################
 
 add_executable(${TARGET} ${SOURCES})
-target_link_libraries(${TARGET} aosiam aoscommon testutils GTest::gmock_main)
-target_include_directories(${TARGET} PRIVATE ../include stubs)
+target_link_libraries(${TARGET} aosiam aoscommon aostestcore aostestutils GTest::gmock_main)
+target_include_directories(${TARGET} PRIVATE .)
 
 gtest_discover_tests(${TARGET})

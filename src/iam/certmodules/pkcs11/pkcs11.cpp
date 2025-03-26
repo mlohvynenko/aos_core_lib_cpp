@@ -14,9 +14,7 @@
 
 #include "../../certhandler/log.hpp"
 
-namespace aos {
-namespace iam {
-namespace certhandler {
+namespace aos::iam::certhandler {
 
 /***********************************************************************************************************************
  * Public
@@ -241,7 +239,7 @@ RetWithError<SharedPtr<crypto::PrivateKeyItf>> PKCS11Module::CreateKey(const Str
     if (mPendingKeys.Size() == mPendingKeys.MaxSize()) {
         LOG_WRN() << "Max pending keys reached: Remove old: certType=" << mCertType;
 
-        auto oldKey = mPendingKeys.Front().mValue.mKey;
+        auto oldKey = mPendingKeys.Front().mKey;
 
         err = pkcs11::Utils(session, *mX509Provider, mLocalCacheAllocator).DeletePrivateKey(oldKey);
         if (!err.IsNone()) {
@@ -717,7 +715,7 @@ Error PKCS11Module::FindObject(pkcs11::SessionContext& session, const SearchObje
             return AOS_ERROR_WRAP(err);
         }
 
-        auto& searchObject = dst.Back().mValue;
+        auto& searchObject = dst.Back();
 
         searchObject.mType   = filter.mType;
         searchObject.mHandle = object;
@@ -837,7 +835,9 @@ Error PKCS11Module::CreateURL(const String& label, const Array<uint8_t>& id, Str
         AddParam("module-path", mConfig.mLibrary.CStr(), false, query);
     }
 
-    AddParam("pin-value", mUserPIN.CStr(), false, query);
+    if (!mUserPIN.IsEmpty()) {
+        AddParam("pin-source", mConfig.mUserPINPath, false, query);
+    }
 
     // combine opaque & query parts of url
     auto err = url.Format("%s:%s?%s", cPKCS11Scheme, opaque.CStr(), query.CStr());
@@ -997,6 +997,4 @@ void PKCS11Module::PrintInvalidObjects(const String& objectType, const Array<Sea
     }
 }
 
-} // namespace certhandler
-} // namespace iam
-} // namespace aos
+} // namespace aos::iam::certhandler

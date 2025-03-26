@@ -17,13 +17,12 @@
 #include "aos/common/crypto/crypto.hpp"
 #include "aos/common/crypto/mbedtls/driverwrapper.hpp"
 
-namespace aos {
-namespace crypto {
+namespace aos::crypto {
 
 /**
  * MbedTLSCryptoProvider provider.
  */
-class MbedTLSCryptoProvider : public x509::ProviderItf {
+class MbedTLSCryptoProvider : public x509::ProviderItf, public HasherItf, public RandomItf {
 public:
     /**
      * Initializes the object.
@@ -174,9 +173,48 @@ public:
      */
     RetWithError<uuid::UUID> CreateUUIDv5(const uuid::UUID& space, const Array<uint8_t>& name) override;
 
+    /**
+     * Creates hash instance.
+     *
+     * @param algorithm hash algorithm.
+     * @return RetWithError<UniquePtr<HashItf>>.
+     */
+    RetWithError<UniquePtr<HashItf>> CreateHash(Hash algorithm) override;
+
+    /**
+     * Generates random integer value in range [0..maxValue].
+     *
+     * @param maxValue maximum value.
+     * @return RetWithError<uint64_t>.
+     */
+    RetWithError<uint64_t> RandInt(uint64_t maxValue) override;
+
+    /**
+     * Generates random buffer.
+     *
+     * @param[out] buffer result buffer.
+     * @param size buffer size.
+     * @return Error.
+     */
+    Error RandBuffer(Array<uint8_t>& buffer, size_t size) override;
+
 private:
+    class MBedTLSHash : public crypto::HashItf, private NonCopyable {
+    public:
+        explicit MBedTLSHash(psa_algorithm_t algorithm);
+        Error Init();
+        Error Update(const Array<uint8_t>& data) override;
+        Error Finalize(Array<uint8_t>& hash) override;
+        ~MBedTLSHash();
+
+    private:
+        psa_hash_operation_t mOperation = PSA_HASH_OPERATION_INIT;
+        psa_algorithm_t      mAlgorithm = PSA_ALG_SHA3_256;
+    };
+
     static constexpr auto cAllocatorSize
-        = AOS_CONFIG_CRYPTO_PUB_KEYS_COUNT * Max(sizeof(RSAPublicKey), sizeof(ECDSAPublicKey));
+        = AOS_CONFIG_CRYPTO_PUB_KEYS_COUNT * Max(sizeof(RSAPublicKey), sizeof(ECDSAPublicKey))
+        + AOS_CONFIG_CRYPTO_HASHER_COUNT * sizeof(MBedTLSHash);
 
     Error              ParseX509Certs(mbedtls_x509_crt* currentCrt, x509::Certificate& cert);
     Error              GetX509CertExtensions(x509::Certificate& cert, mbedtls_x509_crt* crt);
@@ -209,7 +247,6 @@ private:
     StaticAllocator<cAllocatorSize> mAllocator;
 };
 
-} // namespace crypto
-} // namespace aos
+} // namespace aos::crypto
 
 #endif

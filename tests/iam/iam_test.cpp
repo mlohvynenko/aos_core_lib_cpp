@@ -13,12 +13,10 @@
 #include "aos/test/log.hpp"
 #include "aos/test/softhsmenv.hpp"
 #include "mbedtls/pk.h"
-#include "mocks/certreceivermock.hpp"
-#include "stubs/storagestub.hpp"
+#include "mocks/certhandlermock.hpp"
+#include "stubs/certhandlerstub.hpp"
 
-namespace aos {
-namespace iam {
-namespace certhandler {
+namespace aos::iam::certhandler {
 
 using namespace testing;
 
@@ -30,7 +28,7 @@ class IAMTest : public Test {
 protected:
     void SetUp() override
     {
-        InitLog();
+        test::InitLog();
 
         mCertHandler = MakeShared<CertHandler>(&mAllocator);
         ASSERT_TRUE(mCryptoProvider.Init().IsNone());
@@ -48,8 +46,8 @@ protected:
         ASSERT_TRUE(mPKCS11Modules.EmplaceBack().IsNone());
         ASSERT_TRUE(mCertModules.EmplaceBack().IsNone());
 
-        auto& pkcs11Module = mPKCS11Modules.Back().mValue;
-        auto& certModule   = mCertModules.Back().mValue;
+        auto& pkcs11Module = mPKCS11Modules.Back();
+        auto& certModule   = mCertModules.Back();
 
         ASSERT_TRUE(
             pkcs11Module.Init(name, GetPKCS11ModuleConfig(), mSOFTHSMEnv.GetManager(), mCryptoProvider).IsNone());
@@ -390,7 +388,7 @@ TEST_F(IAMTest, SubscribeCertChanged)
     ASSERT_TRUE(mStorage.GetCertsInfo("iam", storageCerts).IsNone());
     ASSERT_EQ(storageCerts.Size(), 1);
 
-    CertReceiverItfMock certReceiver;
+    CertReceiverMock certReceiver;
 
     EXPECT_CALL(certReceiver, OnCertChanged(_));
     ASSERT_TRUE(mCertHandler->SubscribeCertChanged("iam", certReceiver).IsNone());
@@ -618,6 +616,4 @@ TEST_F(IAMTest, RenewCertificate)
     ASSERT_EQ(handles.Size(), 3); // 1 root certificate + 2 generated
 }
 
-} // namespace certhandler
-} // namespace iam
-} // namespace aos
+} // namespace aos::iam::certhandler

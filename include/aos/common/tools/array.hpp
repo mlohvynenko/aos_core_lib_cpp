@@ -35,7 +35,6 @@ public:
      * Crates array instance over the buffer.
      *
      * @param buffer underlying buffer.
-     * @param size current array size.
      */
     explicit Array(const Buffer& buffer) { SetBuffer(buffer); }
 
@@ -67,19 +66,51 @@ public:
      */
     Array& operator=(const Array& array)
     {
-        assert(mItems && array.mSize <= mMaxSize);
+        [[maybe_unused]] auto err = Assign(array);
+        assert(err.IsNone());
+
+        return *this;
+    }
+
+    /**
+     * Assigns existing array to the current one.
+     *
+     * @param array existing array.
+     * @return Error.
+     */
+    Error Assign(const Array& array)
+    {
+        if (this == &array) {
+            return ErrorEnum::eNone;
+        }
+
+        if (!mItems || array.Size() > mMaxSize) {
+            return ErrorEnum::eNoMemory;
+        }
+
+        Clear();
 
         mSize = array.mSize;
-
-        if (mItems == array.mItems) {
-            return *this;
-        }
 
         for (size_t i = 0; i < array.Size(); i++) {
             new (&mItems[i]) T(array.mItems[i]);
         }
 
-        return *this;
+        return ErrorEnum::eNone;
+    }
+
+    /**
+     * Rebinds internal buffer to another array buffer.
+     *
+     * @param array another array instance.
+     */
+    void Rebind(const Array& array)
+    {
+        Clear();
+
+        mItems   = array.mItems;
+        mSize    = array.mSize;
+        mMaxSize = array.mMaxSize;
     }
 
     /**
@@ -281,13 +312,6 @@ public:
     }
 
     /**
-     * Returns true if array is not empty.
-     *
-     * @return bool.
-     */
-    operator bool() const { return Size() > 0; }
-
-    /**
      * Checks if array equals to another array.
      *
      * @param array to compare with.
@@ -464,8 +488,7 @@ public:
     explicit StaticArray(size_t size)
     {
         Array<T>::SetBuffer(mBuffer);
-        auto err = Array<T>::Resize(size);
-
+        [[maybe_unused]] auto err = Array<T>::Resize(size);
         assert(err.IsNone());
     }
 

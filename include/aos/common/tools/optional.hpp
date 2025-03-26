@@ -106,23 +106,20 @@ public:
      * Assigns value.
      *
      * @param value
-     * @return void.
      */
     template <typename... Args>
     void EmplaceValue(Args... args)
     {
         if (HasValue()) {
-            *reinterpret_cast<T*>(mBuffer) = T(args...);
-        } else {
-            ::new (static_cast<void*>(mBuffer)) T(args...);
-            mHasValue = true;
+            GetValue().~T();
         }
+
+        ::new (static_cast<void*>(mBuffer)) T(args...);
+        mHasValue = true;
     }
 
     /**
      * Destroys contained value.
-     *
-     * @return void.
      */
     void Reset()
     {
@@ -158,6 +155,34 @@ public:
      * @return bool.
      */
     bool operator!=(const Optional& other) const { return !operator==(other); }
+
+    /**
+     * Returns pointer to contained value.
+     *
+     * @return T*.
+     */
+    T* operator->() { return &GetValue(); }
+
+    /**
+     * Returns pointer to contained value.
+     *
+     * @return T*.
+     */
+    const T* operator->() const { return &GetValue(); }
+
+    /**
+     * Dereferences holding object.
+     *
+     * @return T&.
+     */
+    T& operator*() { return GetValue(); }
+
+    /**
+     * Dereferences holding object.
+     *
+     * @return T&.
+     */
+    const T& operator*() const { return GetValue(); }
 
     /**
      * Destroys optional instance.

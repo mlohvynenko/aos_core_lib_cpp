@@ -5,18 +5,22 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 
-set(TARGET aoscommoncpp_test)
+set(TARGET aoscommon_test)
 
 # ######################################################################################################################
 # Sources
 # ######################################################################################################################
 
 set(SOURCES
-    ${PROJECT_SOURCE_DIR}/src/common/monitoring/resourcemonitor.cpp
     ${PROJECT_SOURCE_DIR}/src/common/monitoring/average.cpp
+    ${PROJECT_SOURCE_DIR}/src/common/monitoring/alertprocessor.cpp
+    ${PROJECT_SOURCE_DIR}/src/common/monitoring/resourcemonitor.cpp
+    src/alertprocessor_test.cpp
     src/crypto_test.cpp
+    src/cryptoprovider_test.cpp
     src/cryptoutils_test.cpp
     src/monitoring_test.cpp
+    src/ocispec_test.cpp
     src/pkcs11_test.cpp
     src/tools/allocator_test.cpp
     src/tools/array_test.cpp
@@ -31,13 +35,21 @@ set(SOURCES
     src/tools/memory_test.cpp
     src/tools/optional_test.cpp
     src/tools/queue_test.cpp
+    src/tools/semver_test.cpp
     src/tools/string_test.cpp
     src/tools/thread_test.cpp
     src/tools/time_test.cpp
+    src/tools/timer_test.cpp
     src/tools/uuid_test.cpp
     src/tools/variant_test.cpp
     src/types_test.cpp
 )
+
+# ######################################################################################################################
+# Includes
+# ######################################################################################################################
+
+include_directories(${PROJECT_SOURCE_DIR}/tests/include)
 
 # ######################################################################################################################
 # Definitions
@@ -50,6 +62,6 @@ add_definitions(-DAOS_CONFIG_MONITORING_POLL_PERIOD_SEC=1 -DAOS_CONFIG_MONITORIN
 # ######################################################################################################################
 
 add_executable(${TARGET} ${SOURCES})
-target_link_libraries(${TARGET} aoscommon testutils GTest::gmock_main)
+target_link_libraries(${TARGET} aoscommon aostestutils GTest::gmock_main)
 
 gtest_discover_tests(${TARGET})

@@ -12,9 +12,7 @@
 #include "aos/sm/resourcemanager.hpp"
 #include "log.hpp"
 
-namespace aos {
-namespace sm {
-namespace resourcemanager {
+namespace aos::sm::resourcemanager {
 
 /***********************************************************************************************************************
  * ResourceManager
@@ -25,17 +23,20 @@ namespace resourcemanager {
  **********************************************************************************************************************/
 
 Error ResourceManager::Init(JSONProviderItf& jsonProvider, HostDeviceManagerItf& hostDeviceManager,
-    HostGroupManagerItf& hostGroupManager, const String& nodeType, const String& configPath)
+    const String& nodeType, const String& configPath)
 {
+    LOG_DBG() << "Init resource manager";
+
     mJsonProvider      = &jsonProvider;
     mHostDeviceManager = &hostDeviceManager;
-    mHostGroupManager  = &hostGroupManager;
     mNodeType          = nodeType;
     mConfigPath        = configPath;
 
     if (auto err = LoadConfig(); !err.IsNone()) {
         LOG_ERR() << "Failed to load unit config: err=" << err;
     }
+
+    LOG_DBG() << "Node config version: version=" << mConfig->mVersion << ", err=" << mConfigError;
 
     return ErrorEnum::eNone;
 }
@@ -44,9 +45,20 @@ RetWithError<StaticString<cVersionLen>> ResourceManager::GetNodeConfigVersion() 
 {
     LockGuard lock {mMutex};
 
-    LOG_DBG() << "Get node config version: version=" << mConfig.mVersion;
+    LOG_DBG() << "Get node config version: version=" << mConfig->mVersion;
 
-    return {mConfig.mVersion, mConfigError};
+    return {mConfig->mVersion, mConfigError};
+}
+
+Error ResourceManager::GetNodeConfig(aos::NodeConfig& nodeConfig) const
+{
+    LockGuard lock {mMutex};
+
+    LOG_DBG() << "Get node config";
+
+    nodeConfig = mConfig->mNodeConfig;
+
+    return mConfigError;
 }
 
 Error ResourceManager::GetDeviceInfo(const String& deviceName, DeviceInfo& deviceInfo) const
@@ -71,7 +83,7 @@ Error ResourceManager::GetResourceInfo(const String& resourceName, ResourceInfo&
 
     LOG_DBG() << "Get resource info: resourceName=" << resourceName;
 
-    for (const auto& resource : mConfig.mNodeConfig.mResources) {
+    for (const auto& resource : mConfig->mNodeConfig.mResources) {
         if (resource.mName == resourceName) {
             resourceInfo = resource;
 
@@ -92,16 +104,46 @@ Error ResourceManager::AllocateDevice(const String& deviceName, const String& in
         return AOS_ERROR_WRAP(mConfigError);
     }
 
-    DeviceInfo deviceInfo;
+    auto deviceInfo = MakeUnique<DeviceInfo>(&mAllocator);
 
-    auto err = GetConfigDeviceInfo(deviceName, deviceInfo);
-    if (!err.IsNone()) {
+    if (auto err = GetConfigDeviceInfo(deviceName, *deviceInfo); !err.IsNone()) {
         LOG_ERR() << "Device not found: device=" << deviceName;
 
         return AOS_ERROR_WRAP(err);
     }
 
-    return mHostDeviceManager->AllocateDevice(deviceInfo, instanceID);
+    auto deviceIt = mAllocatedDevices.Find(deviceName);
+    if (deviceIt == mAllocatedDevices.end()) {
+        auto instances = MakeUnique<StaticArray<StaticString<cInstanceIDLen>, cMaxNumInstances>>(&mAllocator);
+
+        if (auto err = instances->PushBack(instanceID); !err.IsNone()) {
+            return AOS_ERROR_WRAP(err);
+        }
+
+        if (auto err = mAllocatedDevices.Set(deviceName, *instances); !err.IsNone()) {
+            return AOS_ERROR_WRAP(err);
+        }
+
+        return ErrorEnum::eNone;
+    }
+
+    auto& instances = deviceIt->mSecond;
+
+    if (instances.Find(instanceID) != instances.end()) {
+        LOG_WRN() << "Device is already allocated by instance: device=" << deviceName << ", instance=" << instanceID;
+
+        return ErrorEnum::eNone;
+    }
+
+    if (deviceInfo->mSharedCount != 0 && instances.Size() >= deviceInfo->mSharedCount) {
+        return AOS_ERROR_WRAP(Error(ErrorEnum::eNoMemory, "no device available"));
+    }
+
+    if (auto err = instances.PushBack(instanceID); !err.IsNone()) {
+        return AOS_ERROR_WRAP(err);
+    }
+
+    return ErrorEnum::eNone;
 }
 
 Error ResourceManager::ReleaseDevice(const String& deviceName, const String& instanceID)
@@ -110,7 +152,21 @@ Error ResourceManager::ReleaseDevice(const String& deviceName, const String& ins
 
     LOG_DBG() << "Release device: device=" << deviceName << ", instance=" << instanceID;
 
-    return mHostDeviceManager->RemoveInstanceFromDevice(deviceName, instanceID);
+    auto it = mAllocatedDevices.Find(deviceName);
+
+    if (it == mAllocatedDevices.end()) {
+        return AOS_ERROR_WRAP(Error(ErrorEnum::eNotFound, "device not found"));
+    }
+
+    if (auto count = it->mSecond.Remove(instanceID); count < 1) {
+        return AOS_ERROR_WRAP(Error(ErrorEnum::eNotFound, "instance not found"));
+    }
+
+    if (it->mSecond.IsEmpty()) {
+        mAllocatedDevices.Erase(it);
+    }
+
+    return ErrorEnum::eNone;
 }
 
 Error ResourceManager::ReleaseDevices(const String& instanceID)
@@ -119,7 +175,33 @@ Error ResourceManager::ReleaseDevices(const String& instanceID)
 
     LOG_DBG() << "Release devices: instanceID=" << instanceID;
 
-    return mHostDeviceManager->RemoveInstanceFromAllDevices(instanceID);
+    Error err = ErrorEnum::eNotFound;
+
+    auto it = mAllocatedDevices.begin();
+    while (it != mAllocatedDevices.end()) {
+        if (auto count = it->mSecond.Remove(instanceID); count > 0) {
+            err = ErrorEnum::eNone;
+        }
+
+        if (it->mSecond.IsEmpty()) {
+            it = mAllocatedDevices.Erase(it);
+        } else {
+            ++it;
+        }
+    }
+
+    return err;
+}
+
+Error ResourceManager::ResetAllocatedDevices()
+{
+    LockGuard lock {mMutex};
+
+    LOG_DBG() << "Reset allocated devices";
+
+    mAllocatedDevices.Clear();
+
+    return ErrorEnum::eNone;
 }
 
 Error ResourceManager::GetDeviceInstances(
@@ -129,7 +211,18 @@ Error ResourceManager::GetDeviceInstances(
 
     LOG_DBG() << "Get device instances: device=" << deviceName;
 
-    return mHostDeviceManager->GetDeviceInstances(deviceName, instanceIDs);
+    auto it = mAllocatedDevices.Find(deviceName);
+    if (it == mAllocatedDevices.end()) {
+        return AOS_ERROR_WRAP(ErrorEnum::eNotFound);
+    }
+
+    for (const auto& instance : it->mSecond) {
+        if (auto err = instanceIDs.PushBack(instance); !err.IsNone()) {
+            return AOS_ERROR_WRAP(err);
+        }
+    }
+
+    return ErrorEnum::eNone;
 }
 
 Error ResourceManager::CheckNodeConfig(const String& version, const String& config) const
@@ -138,7 +231,7 @@ Error ResourceManager::CheckNodeConfig(const String& version, const String& conf
 
     LOG_DBG() << "Check unit config: version=" << version;
 
-    if (version == mConfig.mVersion) {
+    if (version == mConfig->mVersion) {
         LOG_ERR() << "Invalid node config version version";
 
         return AOS_ERROR_WRAP(ErrorEnum::eInvalidArgument);
@@ -146,7 +239,7 @@ Error ResourceManager::CheckNodeConfig(const String& version, const String& conf
 
     auto updatedConfig = MakeUnique<sm::resourcemanager::NodeConfig>(&mAllocator);
 
-    auto err = mJsonProvider->ParseNodeConfig(config, *updatedConfig);
+    auto err = mJsonProvider->NodeConfigFromJSON(config, *updatedConfig);
     if (!err.IsNone()) {
         return AOS_ERROR_WRAP(err);
     }
@@ -167,7 +260,7 @@ Error ResourceManager::UpdateNodeConfig(const String& version, const String& con
 
     auto updatedConfig = MakeUnique<sm::resourcemanager::NodeConfig>(&mAllocator);
 
-    if (auto err = mJsonProvider->ParseNodeConfig(config, *updatedConfig); !err.IsNone()) {
+    if (auto err = mJsonProvider->NodeConfigFromJSON(config, *updatedConfig); !err.IsNone()) {
         LOG_ERR() << "Failed to parse config: err=" << err;
 
         return AOS_ERROR_WRAP(err);
@@ -187,7 +280,39 @@ Error ResourceManager::UpdateNodeConfig(const String& version, const String& con
         return err;
     }
 
+    for (auto& subscriber : mSubscribers) {
+        subscriber->ReceiveNodeConfig(*mConfig);
+    }
+
     return ErrorEnum::eNone;
+}
+
+Error ResourceManager::SubscribeCurrentNodeConfigChange(NodeConfigReceiverItf& receiver)
+{
+    LockGuard lock {mMutex};
+
+    LOG_DBG() << "Subscribe to current node config change";
+
+    for (auto& subscriber : mSubscribers) {
+        if (subscriber == &receiver) {
+            return ErrorEnum::eAlreadyExist;
+        }
+    }
+
+    if (auto err = mSubscribers.PushBack(&receiver); !err.IsNone()) {
+        return AOS_ERROR_WRAP(err);
+    }
+
+    return ErrorEnum::eNone;
+}
+
+Error ResourceManager::UnsubscribeCurrentNodeConfigChange(NodeConfigReceiverItf& receiver)
+{
+    LockGuard lock {mMutex};
+
+    LOG_DBG() << "Unsubscribe from current node config change";
+
+    return (mSubscribers.Remove(&receiver) > 0) ? ErrorEnum::eNone : ErrorEnum::eNotFound;
 }
 
 /***********************************************************************************************************************
@@ -198,10 +323,13 @@ Error ResourceManager::LoadConfig()
 {
     auto configJSON = MakeUnique<StaticString<cNodeConfigJSONLen>>(&mAllocator);
 
+    mConfig.Reset();
+    mConfig = MakeUnique<NodeConfig>(&mAllocator);
+
     auto err = FS::ReadFileToString(mConfigPath, *configJSON);
     if (!err.IsNone()) {
         if (err == ENOENT) {
-            mConfig.mVersion = "0.0.0";
+            mConfig->mVersion = "0.0.0";
 
             return ErrorEnum::eNone;
         }
@@ -211,7 +339,14 @@ Error ResourceManager::LoadConfig()
         return AOS_ERROR_WRAP(err);
     }
 
-    err = mJsonProvider->ParseNodeConfig(*configJSON, mConfig);
+    err = mJsonProvider->NodeConfigFromJSON(*configJSON, *mConfig);
+    if (!err.IsNone()) {
+        mConfigError = err;
+
+        return AOS_ERROR_WRAP(err);
+    }
+
+    err = ValidateNodeConfig(*mConfig);
     if (!err.IsNone()) {
         mConfigError = err;
 
@@ -225,7 +360,7 @@ Error ResourceManager::WriteConfig(const NodeConfig& config)
 {
     auto configJSON = MakeUnique<StaticString<cNodeConfigJSONLen>>(&mAllocator);
 
-    if (auto err = mJsonProvider->DumpNodeConfig(config, *configJSON); !err.IsNone()) {
+    if (auto err = mJsonProvider->NodeConfigToJSON(config, *configJSON); !err.IsNone()) {
         LOG_ERR() << "Failed to dump config: err=" << err;
 
         return AOS_ERROR_WRAP(err);
@@ -240,7 +375,7 @@ Error ResourceManager::WriteConfig(const NodeConfig& config)
     return ErrorEnum::eNone;
 }
 
-Error ResourceManager::ValidateNodeConfig(const aos::sm::resourcemanager::NodeConfig& config) const
+Error ResourceManager::ValidateNodeConfig(const resourcemanager::NodeConfig& config) const
 {
     if (!config.mNodeConfig.mNodeType.IsEmpty() && config.mNodeConfig.mNodeType != mNodeType) {
         LOG_ERR() << "Invalid node type";
@@ -260,19 +395,19 @@ Error ResourceManager::ValidateDevices(const Array<DeviceInfo>& devices) const
     for (const auto& device : devices) {
         // check host devices
         for (const auto& hostDevice : device.mHostDevices) {
-            if (!mHostDeviceManager->DeviceExists(hostDevice)) {
+            if (auto err = mHostDeviceManager->CheckDevice(hostDevice); !err.IsNone()) {
                 LOG_ERR() << "Host device not found: device=" << hostDevice;
 
-                return AOS_ERROR_WRAP(ErrorEnum::eNotFound);
+                return AOS_ERROR_WRAP(err);
             }
         }
 
         // check groups
         for (const auto& group : device.mGroups) {
-            if (!mHostGroupManager->GroupExists(group)) {
+            if (auto err = mHostDeviceManager->CheckGroup(group); !err.IsNone()) {
                 LOG_ERR() << "Host group not found: group=" << group;
 
-                return AOS_ERROR_WRAP(ErrorEnum::eNotFound);
+                return AOS_ERROR_WRAP(err);
             }
         }
     }
@@ -282,7 +417,7 @@ Error ResourceManager::ValidateDevices(const Array<DeviceInfo>& devices) const
 
 Error ResourceManager::GetConfigDeviceInfo(const String& deviceName, DeviceInfo& deviceInfo) const
 {
-    for (auto& device : mConfig.mNodeConfig.mDevices) {
+    for (auto& device : mConfig->mNodeConfig.mDevices) {
         if (device.mName == deviceName) {
             deviceInfo = device;
 
@@ -293,6 +428,4 @@ Error ResourceManager::GetConfigDeviceInfo(const String& deviceName, DeviceInfo&
     return ErrorEnum::eNotFound;
 }
 
-} // namespace resourcemanager
-} // namespace sm
-} // namespace aos
+} // namespace aos::sm::resourcemanager

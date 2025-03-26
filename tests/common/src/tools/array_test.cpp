@@ -79,7 +79,7 @@ TEST(ArrayTest, Basic)
         auto ret2 = staticArray.Back();
         EXPECT_TRUE(staticArray.PopBack().IsNone());
 
-        EXPECT_EQ(ret1.mValue, ret2.mValue);
+        EXPECT_EQ(ret1, ret2);
     }
 
     // Test const array
@@ -96,6 +96,67 @@ TEST(ArrayTest, Basic)
     for (auto& value : constArray) {
         EXPECT_EQ(value, cArray[i++]);
     }
+}
+
+TEST(ArrayTest, Assign)
+{
+    constexpr int                        cValues[] = {1, 2, 3, 4, 5};
+    StaticArray<int, std::size(cValues)> array;
+
+    for (const auto val : cValues) {
+        ASSERT_EQ(array.PushBack(val), ErrorEnum::eNone);
+    }
+
+    StaticArray<int, std::size(cValues)> array2;
+    ASSERT_EQ(array2.Assign(array), ErrorEnum::eNone);
+
+    ASSERT_EQ(array, array2);
+
+    StaticArray<int, std::size(cValues) - 1> array3;
+    ASSERT_EQ(array3.Assign(array), ErrorEnum::eNoMemory);
+
+    ASSERT_TRUE(array3.IsEmpty());
+}
+
+TEST(ArrayTest, AssignDestructsExistingData)
+{
+    auto ptr = std::make_shared<int>();
+
+    StaticArray<decltype(ptr), 1> array1;
+    ASSERT_EQ(array1.PushBack(ptr), ErrorEnum::eNone);
+
+    StaticArray<decltype(ptr), 1> array2;
+    ASSERT_EQ(array2.Assign(array1), ErrorEnum::eNone);
+
+    ASSERT_EQ(array1, array2);
+    ASSERT_EQ(ptr.use_count(), 3);
+
+    ASSERT_EQ(array2.Assign(array1), ErrorEnum::eNone);
+    ASSERT_EQ(ptr.use_count(), 3);
+}
+
+TEST(ArrayTest, AssignToArray)
+{
+    auto ptr = std::make_shared<int>();
+
+    StaticArray<decltype(ptr), 2> array1;
+    ASSERT_EQ(array1.PushBack(ptr), ErrorEnum::eNone);
+    ASSERT_EQ(array1.PushBack(ptr), ErrorEnum::eNone);
+
+    ASSERT_EQ(ptr.use_count(), 3);
+
+    Array<decltype(ptr)> array2;
+    ASSERT_EQ(array2.Assign(array1), ErrorEnum::eNoMemory);
+    ASSERT_TRUE(array2.IsEmpty());
+
+    ASSERT_EQ(ptr.use_count(), 3);
+
+    StaticArray<decltype(ptr), 1> array3;
+    ASSERT_EQ(array3.PushBack(ptr), ErrorEnum::eNone);
+    ASSERT_EQ(array3.Assign(array1), ErrorEnum::eNoMemory);
+    ASSERT_EQ(array3.Size(), 1);
+
+    ASSERT_EQ(ptr.use_count(), 4);
 }
 
 TEST(ArrayTest, Insert)
@@ -134,20 +195,19 @@ TEST(ArrayTest, Find)
     // Found
 
     auto result = array.Find(4);
-    EXPECT_TRUE(result.mError.IsNone());
-    EXPECT_EQ(*result.mValue, 4);
+    ASSERT_NE(result, array.end());
+    EXPECT_EQ(*result, 4);
 
     // Not found
 
     result = array.Find(13);
-    EXPECT_TRUE(result.mError.Is(ErrorEnum::eNotFound));
-    EXPECT_EQ(result.mValue, array.end());
+    EXPECT_EQ(result, array.end());
 
     // Found matched
 
     result = array.FindIf([](const int& value) { return value == 8 ? true : false; });
-    EXPECT_TRUE(result.mError.IsNone());
-    EXPECT_EQ(*result.mValue, 8);
+    ASSERT_NE(result, array.end());
+    EXPECT_EQ(*result, 8);
 }
 
 TEST(ArrayTest, Erase)
@@ -268,13 +328,15 @@ TEST(ArrayTest, Sort)
 
     auto array = Array<int>(intValues, ArraySize(intValues));
 
-    array.Sort();
+    int tmpValue;
+
+    array.Sort(tmpValue);
 
     for (size_t i = 0; i < ArraySize(intValues); i++) {
         EXPECT_EQ(array[i], i);
     }
 
-    array.Sort([](int a, int b) { return a > b; });
+    array.Sort([](int a, int b) { return a > b; }, tmpValue);
 
     for (size_t i = 0; i < ArraySize(intValues); i++) {
         EXPECT_EQ(array[i], ArraySize(intValues) - i - 1);

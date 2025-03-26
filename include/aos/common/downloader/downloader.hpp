@@ -12,18 +12,18 @@
 #include "aos/common/tools/error.hpp"
 #include "aos/common/tools/string.hpp"
 
-namespace aos {
+namespace aos::downloader {
 
 /**
  * Download content type.
  */
 class DownloadContentType {
 public:
-    enum class Enum { eService };
+    enum class Enum { eService, eLayer };
 
     static const Array<const char* const> GetStrings()
     {
-        static const char* const sContentTypeStrings[] = {"service"};
+        static const char* const sContentTypeStrings[] = {"service", "layer"};
 
         return Array<const char* const>(sContentTypeStrings, ArraySize(sContentTypeStrings));
     };
@@ -53,6 +53,6 @@ public:
     virtual ~DownloaderItf() = default;
 };
 
-} // namespace aos
+} // namespace aos::downloader
 
 #endif

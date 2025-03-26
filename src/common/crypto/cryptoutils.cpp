@@ -10,8 +10,7 @@
 
 #include "log.hpp"
 
-namespace aos {
-namespace crypto {
+namespace aos::crypto {
 
 /***********************************************************************************************************************
  * Constants
@@ -223,6 +222,8 @@ RetWithError<SharedPtr<crypto::PrivateKeyItf>> CertLoader::LoadPrivKeyFromFile(c
  * Private
  **********************************************************************************************************************/
 
+namespace {
+
 Error FindUrlParam(const String& url, const String& paramName, String& paramValue)
 {
     Error  err   = ErrorEnum::eNone;
@@ -231,7 +232,7 @@ Error FindUrlParam(const String& url, const String& paramName, String& paramValu
     Tie(start, err) = url.FindSubstr(0, paramName);
 
     if (!err.IsNone()) {
-        return ErrorEnum::eNone;
+        return err;
     }
 
     start += paramName.Size() + 1; // skip paramName=
@@ -242,6 +243,46 @@ Error FindUrlParam(const String& url, const String& paramName, String& paramValu
 
     return paramValue.Insert(paramValue.end(), url.Get() + start, url.Get() + end);
 }
+
+Error ParsePIN(const String& url, String& pin)
+{
+    auto pinValueErr = FindUrlParam(url, "pin-value", pin);
+    if (!pinValueErr.IsNone() && !pinValueErr.Is(ErrorEnum::eNotFound)) {
+        return AOS_ERROR_WRAP(ErrorEnum::eInvalidArgument);
+    }
+
+    StaticString<cFilePathLen> pinPath;
+
+    auto pinSourceErr = FindUrlParam(url, "pin-source", pinPath);
+    if (!pinSourceErr.IsNone() && !pinSourceErr.Is(ErrorEnum::eNotFound)) {
+        return AOS_ERROR_WRAP(ErrorEnum::eInvalidArgument);
+    }
+
+    if (pinValueErr.IsNone() && pinSourceErr.IsNone()) {
+        // either pin-source or pin-value should be provided
+        return AOS_ERROR_WRAP(ErrorEnum::eInvalidArgument);
+    }
+
+    if (pinValueErr.Is(ErrorEnum::eNotFound) && pinSourceErr.Is(ErrorEnum::eNotFound)) {
+        // if neither pin-value nor pin-source provided, return an empty pin without error.
+        pin.Clear();
+
+        return ErrorEnum::eNone;
+    }
+
+    if (pinValueErr.IsNone()) {
+        return ErrorEnum::eNone;
+    }
+
+    pinSourceErr = FS::ReadFileToString(pinPath, pin);
+    if (!pinSourceErr.IsNone()) {
+        return AOS_ERROR_WRAP(pinSourceErr);
+    }
+
+    return ErrorEnum::eNone;
+}
+
+} // namespace
 
 /***********************************************************************************************************************
  * ParseURLScheme
@@ -400,13 +441,12 @@ Error ParsePKCS11URL(
         return AOS_ERROR_WRAP(err);
     }
 
-    err = FindUrlParam(url, "pin-value", userPin);
-    if (!err.IsNone() && !err.Is(ErrorEnum::eNotFound)) {
-        return AOS_ERROR_WRAP(err);
+    err = ParsePIN(url, userPin);
+    if (!err.IsNone()) {
+        return err;
     }
 
     return ErrorEnum::eNone;
 }
 
-} // namespace crypto
-} // namespace aos
+} // namespace aos::crypto

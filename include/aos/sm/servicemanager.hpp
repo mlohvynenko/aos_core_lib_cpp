@@ -8,21 +8,49 @@
 #ifndef AOS_SERVICEMANAGER_HPP_
 #define AOS_SERVICEMANAGER_HPP_
 
-#include "aos/common/downloader.hpp"
-#include "aos/common/ocispec.hpp"
+#include "aos/common/downloader/downloader.hpp"
+#include "aos/common/ocispec/ocispec.hpp"
+#include "aos/common/spaceallocator/spaceallocator.hpp"
 #include "aos/common/tools/allocator.hpp"
 #include "aos/common/tools/noncopyable.hpp"
 #include "aos/common/tools/thread.hpp"
+#include "aos/common/tools/timer.hpp"
 #include "aos/common/types.hpp"
 #include "aos/sm/config.hpp"
+#include "aos/sm/image/imagehandler.hpp"
+#include "aos/sm/image/imageparts.hpp"
 
-namespace aos {
-namespace sm {
-namespace servicemanager {
+namespace aos::sm::servicemanager {
 
 /** @addtogroup sm Service Manager
  *  @{
  */
+
+/**
+ * Service state type.
+ */
+class ServiceStateType {
+public:
+    enum class Enum {
+        eActive,
+        eCached,
+        ePending,
+    };
+
+    static const Array<const char* const> GetStrings()
+    {
+        static const char* const sStateStrings[] = {
+            "active",
+            "cached",
+            "pending",
+        };
+
+        return Array<const char* const>(sStateStrings, ArraySize(sStateStrings));
+    };
+};
+
+using ServiceStateEnum = ServiceStateType::Enum;
+using ServiceState     = EnumStringer<ServiceStateType>;
 
 /**
  * Service manager service data.
@@ -59,9 +87,9 @@ struct ServiceData {
     Time mTimestamp;
 
     /**
-     * Cached flag.
+     * State.
      */
-    bool mCached;
+    ServiceState mState;
 
     /**
      * Service size.
@@ -82,7 +110,7 @@ struct ServiceData {
     bool operator==(const ServiceData& data) const
     {
         return mServiceID == data.mServiceID && mProviderID == data.mProviderID && mVersion == data.mVersion
-            && mImagePath == data.mImagePath && data.mManifestDigest == mManifestDigest && mCached == data.mCached
+            && mImagePath == data.mImagePath && data.mManifestDigest == mManifestDigest && mState == data.mState
             && mSize == data.mSize && mGID == data.mGID;
     }
 
@@ -101,24 +129,6 @@ struct ServiceData {
 using ServiceDataStaticArray = StaticArray<ServiceData, cMaxNumServices>;
 
 /**
- * Image parts.
- */
-struct ImageParts {
-    /**
-     * Image config path.
-     */
-    StaticString<cFilePathLen> mImageConfigPath;
-    /**
-     * Service config path.
-     */
-    StaticString<cFilePathLen> mServiceConfigPath;
-    /**
-     * Service root FS path.
-     */
-    StaticString<cFilePathLen> mServiceFSPath;
-};
-
-/**
  * Service manager storage interface.
  */
 class StorageItf {
@@ -132,12 +142,13 @@ public:
     virtual Error AddService(const ServiceData& service) = 0;
 
     /**
-     * Returns service data by service ID.
+     * Returns service versions by service ID.
      *
      * @param serviceID service ID.
-     * @return  RetWithError<ServiceData>.
+     * @param services[out] service version for the given id.
+     * @return Error.
      */
-    virtual RetWithError<ServiceData> GetService(const String& serviceID) = 0;
+    virtual Error GetServiceVersions(const String& serviceID, Array<sm::servicemanager::ServiceData>& services) = 0;
 
     /**
      * Updates previously stored service.
@@ -176,20 +187,22 @@ public:
 class ServiceManagerItf {
 public:
     /**
-     * Installs services.
+     * Processes desired services.
      *
-     * @param services to install.
-     * @return Error
+     * @param services desired services.
+     * @param serviceStatuses[out] service statuses.
+     * @return Error.
      */
-    virtual Error InstallServices(const Array<ServiceInfo>& services) = 0;
+    virtual Error ProcessDesiredServices(const Array<ServiceInfo>& services, Array<ServiceStatus>& serviceStatuses) = 0;
 
     /**
      * Returns service item by service ID.
      *
      * @param serviceID service ID.
-     * @return RetWithError<ServiceItem>.
+     * @param service[out] service item.
+     * @return Error.
      */
-    virtual RetWithError<ServiceData> GetService(const String& serviceID) = 0;
+    virtual Error GetService(const String& serviceID, ServiceData& service) = 0;
 
     /**
      * Returns all installed services.
@@ -203,9 +216,26 @@ public:
      * Returns service image parts.
      *
      * @param service service item.
-     * @return RetWithError<ImageParts>.
+     * @param imageParts[out] image parts.
+     * @return Error.
      */
-    virtual RetWithError<ImageParts> GetImageParts(const ServiceData& service) = 0;
+    virtual Error GetImageParts(const ServiceData& service, image::ImageParts& imageParts) = 0;
+
+    /**
+     * Validates service.
+     *
+     * @param service service to validate.
+     * @return Error.
+     */
+    virtual Error ValidateService(const ServiceData& service) = 0;
+
+    /**
+     * Removes service.
+     *
+     * @param service service to remove.
+     * @return Error.
+     */
+    virtual Error RemoveService(const ServiceData& service) = 0;
 
     /**
      * Destroys storage interface.
@@ -213,7 +243,17 @@ public:
     virtual ~ServiceManagerItf() = default;
 };
 
-class ServiceManager : public ServiceManagerItf, private NonCopyable {
+/**
+ * Service manager configuration.
+ */
+struct Config {
+    StaticString<cFilePathLen> mServicesDir;
+    StaticString<cFilePathLen> mDownloadDir;
+    Duration                   mTTL;
+    Duration                   mRemoveOutdatedPeriod = 24 * Time::cHours;
+};
+
+class ServiceManager : public ServiceManagerItf, public spaceallocator::ItemRemoverItf, private NonCopyable {
 public:
     /**
      * Creates service manager.
@@ -223,33 +263,55 @@ public:
     /**
      * Destroys service manager.
      */
-    ~ServiceManager() { mInstallPool.Shutdown(); }
+    ~ServiceManager();
 
     /**
      * Initializes service manager.
      *
+     * @param config service manager configuration.
      * @param ociManager OCI manager instance.
      * @param downloader downloader instance.
      * @param storage storage instance.
+     * @param serviceSpaceAllocator service space allocator.
+     * @param downloadSpaceAllocator download space allocator.
+     * @param imageHandler image handler.
      * @return Error.
      */
-    Error Init(OCISpecItf& ociManager, DownloaderItf& downloader, StorageItf& storage);
+    Error Init(const Config& config, oci::OCISpecItf& ociManager, downloader::DownloaderItf& downloader,
+        StorageItf& storage, spaceallocator::SpaceAllocatorItf& serviceSpaceAllocator,
+        spaceallocator::SpaceAllocatorItf& downloadSpaceAllocator, image::ImageHandlerItf& imageHandler);
 
     /**
-     * Installs services.
+     * Starts service manager.
      *
-     * @param services to install.
-     * @return Error
+     * @return Error.
      */
-    Error InstallServices(const Array<ServiceInfo>& services) override;
+    Error Start();
+
+    /**
+     * Stops service manager.
+     *
+     * @return Error.
+     */
+    Error Stop();
+
+    /**
+     * Process desired services.
+     *
+     * @param services desired services.
+     * @param serviceStatuses[out] service statuses.
+     * @return Error.
+     */
+    Error ProcessDesiredServices(const Array<ServiceInfo>& services, Array<ServiceStatus>& serviceStatuses) override;
 
     /**
      * Returns service item by service ID.
      *
      * @param serviceID service ID.
-     * @return RetWithError<ServiceItem>.
+     * @param service[out] service item.
+     * @return Error.
      */
-    RetWithError<ServiceData> GetService(const String& serviceID) override;
+    Error GetService(const String& serviceID, ServiceData& service) override;
 
     /**
      * Returns all installed services.
@@ -263,34 +325,75 @@ public:
      * Returns service image parts.
      *
      * @param service service item.
-     * @return RetWithError<ImageParts>.
+     * @param imageParts[out] image parts.
+     * @return Error.
      */
-    RetWithError<ImageParts> GetImageParts(const ServiceData& service) override;
+    Error GetImageParts(const ServiceData& service, image::ImageParts& imageParts) override;
+
+    /**
+     * Validates service.
+     *
+     * @param service service to validate.
+     * @return Error.
+     */
+    Error ValidateService(const ServiceData& service) override;
+
+    /**
+     * Removes service.
+     *
+     * @param service service to remove.
+     * @return Error.
+     */
+    Error RemoveService(const ServiceData& service) override;
+
+    /**
+     * Removes item.
+     *
+     * @param id item id.
+     * @return Error.
+     */
+    Error RemoveItem(const String& id) override;
 
 private:
-    static constexpr auto cNumInstallThreads = AOS_CONFIG_SERVICEMANAGER_NUM_COOPERATE_INSTALLS;
-    static constexpr auto cServicesDir       = AOS_CONFIG_SERVICEMANAGER_SERVICES_DIR;
-    static constexpr auto cImageManifestFile = "manifest.json";
-    static constexpr auto cImageBlobsFolder  = "blobs";
+    static constexpr auto cNumInstallThreads  = AOS_CONFIG_SERVICEMANAGER_NUM_COOPERATE_INSTALLS;
+    static constexpr auto cImageManifestFile  = "manifest.json";
+    static constexpr auto cImageBlobsFolder   = "blobs";
+    static constexpr auto cAllocatorItemLen   = cServiceIDLen + cVersionLen + 1;
+    static constexpr auto cNumServiceVersions = 2;
 
-    Error                                    RemoveService(const ServiceData& service);
-    Error                                    InstallService(const ServiceInfo& service);
-    RetWithError<StaticString<cFilePathLen>> DigestToPath(const String& imagePath, const String& digest);
+    Error ProcessAlreadyInstalledServices(Array<ServiceInfo>& desiredServices, Array<ServiceStatus>& serviceStatuses);
+    Error InstallServices(const Array<ServiceInfo>& services, Array<ServiceStatus>& serviceStatuses);
+    Error PrepareSpaceForServices(size_t desiredServicesNum);
+    Error TruncServiceVersions(const String& serviceID, size_t threshold);
+    Error RemoveDamagedServiceFolders(const Array<ServiceData>& services);
+    Error RemoveOutdatedServices(const Array<ServiceData>& services);
+    Error RemoveServiceFromSystem(const ServiceData& service);
+    Error InstallService(const ServiceInfo& service);
+    Error SetServiceState(const ServiceData& service, ServiceState state);
+    RetWithError<StaticString<cFilePathLen>>       DigestToPath(const String& imagePath, const String& digest);
+    RetWithError<StaticString<cAllocatorItemLen>>  FormatAllocatorItemID(const ServiceData& service);
+    RetWithError<StaticString<oci::cMaxDigestLen>> GetManifestChecksum(const String& servicePath);
 
-    OCISpecItf*    mOCIManager {};
-    DownloaderItf* mDownloader {};
-    StorageItf*    mStorage {};
+    Config                             mConfig {};
+    oci::OCISpecItf*                   mOCIManager             = nullptr;
+    downloader::DownloaderItf*         mDownloader             = nullptr;
+    StorageItf*                        mStorage                = nullptr;
+    spaceallocator::SpaceAllocatorItf* mServiceSpaceAllocator  = nullptr;
+    spaceallocator::SpaceAllocatorItf* mDownloadSpaceAllocator = nullptr;
+    image::ImageHandlerItf*            mImageHandler           = nullptr;
+    Timer                              mTimer;
+    Mutex                              mMutex;
 
-    Mutex mMutex;
-    StaticAllocator<Max(sizeof(ServiceDataStaticArray), sizeof(oci::ImageManifest) + sizeof(oci::ContentDescriptor))>
-                                                    mAllocator;
+    StaticAllocator<2 * sizeof(ServiceDataStaticArray) + sizeof(ServiceInfoStaticArray)
+            + cNumInstallThreads * (sizeof(oci::ImageManifest) + sizeof(ServiceData)),
+        cNumInstallThreads * 3>
+        mAllocator;
+
     ThreadPool<cNumInstallThreads, cMaxNumServices> mInstallPool;
 };
 
 /** @}*/
 
-} // namespace servicemanager
-} // namespace sm
-} // namespace aos
+} // namespace aos::sm::servicemanager
 
 #endif

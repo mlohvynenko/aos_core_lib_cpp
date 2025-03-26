@@ -21,41 +21,53 @@ namespace aos {
  */
 
 template <typename Key, typename Value>
-class Map {
+class Map : public AlgorithmItf<Pair<Key, Value>, Pair<Key, Value>*, const Pair<Key, Value>*> {
 public:
-    /**
-     * Returns a reference to the value with specified key. And an error if a key is absent.
-     *
-     * @param key
-     * @return RetWithError<Value&>
-     */
-    RetWithError<Value&> At(const Key& key)
-    {
-        auto item = mItems.FindIf([&key](const Pair<Key, Value>& item) { return item.mFirst == key; });
+    using ValueType     = Pair<Key, Value>;
+    using Iterator      = ValueType*;
+    using ConstIterator = const ValueType*;
 
-        return {item.mValue->mSecond, item.mError};
+    /**
+     * Finds element in map by key.
+     *
+     * @param key key to find.
+     * @return Iterator.
+     */
+    Iterator Find(const Key& key)
+    {
+        for (auto it = begin(); it != end(); ++it) {
+            if (it->mFirst == key) {
+                return it;
+            }
+        }
+
+        return end();
     }
 
     /**
-     * Returns reference to the value with specified key. And an error if a key is absent.
+     * Finds element in map by key.
      *
-     * @param key
-     * @return RetWithError<const Value&>
+     * @param key key to find.
+     * @return ConstIterator.
      */
-    RetWithError<const Value&> At(const Key& key) const
+    ConstIterator Find(const Key& key) const
     {
-        auto item = mItems.FindIf([&key](const Pair<Key, Value>& item) { return item.mFirst == key; });
+        for (auto it = begin(); it != end(); ++it) {
+            if (it->mFirst == key) {
+                return it;
+            }
+        }
 
-        return {item.mValue->mSecond, item.mError};
+        return end();
     }
 
     /**
      * Replaces map with elements from the array.
      *
-     * @param array source array
-     * @return Error
+     * @param array source array.
+     * @return Error.
      */
-    Error Assign(const Array<Pair<Key, Value>>& array)
+    Error Assign(const Array<ValueType>& array)
     {
         mItems.Clear();
 
@@ -72,8 +84,8 @@ public:
     /**
      * Replaces map elements with a copy of the elements from other map.
      *
-     * @param map source map
-     * @return Error
+     * @param map source map.
+     * @return Error.
      */
     Error Assign(const Map<Key, Value>& map)
     {
@@ -89,16 +101,16 @@ public:
     /**
      * Inserts or replaces a value with a specified key.
      *
-     * @param key
-     * @param value
-     * @return Error
+     * @param key key to insert.
+     * @param value value to insert.
+     * @return Error.
      */
     Error Set(const Key& key, const Value& value)
     {
-        auto cur = At(key);
-        if (cur.mError.IsNone()) {
+        auto cur = Find(key);
+        if (cur != end()) {
             // cppcheck-suppress unreadVariable
-            cur.mValue = value;
+            cur->mSecond = value;
 
             return ErrorEnum::eNone;
         }
@@ -107,36 +119,60 @@ public:
     }
 
     /**
-     * Inserts a new value into the map.
+     * Emplaces new key into the map, returns error if it already exists.
      *
-     * @param args list of arguments to construct a new element.
-     * @return Error
+     * @param key key to emplace.
+     * @param args list of arguments to construct a new value.
+     * @return Error.
      */
     template <typename... Args>
-    Error Emplace(Args&&... args)
+    Error Emplace(const Key& key, Args&&... args)
     {
-        const auto kv = Pair<Key, Value>(args...);
-
-        auto cur = At(kv.mFirst);
-        if (!cur.mError.IsNone()) {
-            return mItems.EmplaceBack(kv);
+        auto it = Find(key);
+        if (it == end()) {
+            return mItems.EmplaceBack(key, args...);
         }
 
-        return ErrorEnum::eInvalidArgument;
+        return ErrorEnum::eAlreadyExist;
+    }
+
+    /**
+     * Tries to emplace a new value into the map. If key already exists, do nothing. Otherwise, emplace a new value.
+     *
+     * @param key key to insert.
+     * @param args list of arguments to construct a new element.
+     * @return Error.
+     */
+    template <typename... Args>
+    Error TryEmplace(const Key& key, Args&&... args)
+    {
+        if (auto it = Find(key); it == end()) {
+            return mItems.EmplaceBack(key, args...);
+        }
+
+        return ErrorEnum::eNone;
     }
 
     /**
      * Removes element with the specified key from the map.
      *
-     * @param key
-     * @return Error
+     * @param key key to remove.
+     * @return Error.
      */
     Error Remove(const Key& key)
     {
-        const auto matchKey = [&key](const Pair<Key, Value>& item) { return item.mFirst == key; };
+        const auto matchKey = [&key](const ValueType& item) { return item.mFirst == key; };
 
         return mItems.RemoveIf(matchKey) ? ErrorEnum::eNone : ErrorEnum::eNotFound;
     }
+
+    /**
+     * Checks if the map contains an element with the specified key.
+     *
+     * @param key key to check.
+     * @return bool.
+     */
+    bool Contains(const Key& key) const { return Find(key) != end(); }
 
     /**
      * Removes all elements from the map.
@@ -148,20 +184,27 @@ public:
      *
      * @return size_t.
      */
-    size_t Size() const { return mItems.Size(); }
+    size_t Size() const override { return mItems.Size(); }
 
     /**
      * Returns maximum allowed number of elements in the map.
      *
      * @return size_t.
      */
-    size_t MaxSize() const { return mItems.MaxSize(); }
+    size_t MaxSize() const override { return mItems.MaxSize(); }
+
+    /**
+     * Returns true if the map is empty.
+     *
+     * @return bool.
+     */
+    bool IsEmpty() const { return mItems.IsEmpty(); }
 
     /**
      * Compares contents of two maps.
      *
      * @param other map to be compared with.
-     * @return bool
+     * @return bool.
      */
     bool operator==(const Map<Key, Value>& other) const
     {
@@ -170,7 +213,7 @@ public:
         }
 
         for (const auto& item : other) {
-            if (!mItems.Find(item).mError.IsNone()) {
+            if (mItems.Find(item) == mItems.end()) {
                 return false;
             }
         }
@@ -182,26 +225,43 @@ public:
      * Compares contents of two maps.
      *
      * @param other map to be compared with.
-     * @return bool
+     * @return bool.
      */
     bool operator!=(const Map<Key, Value>& other) const { return !(*this == other); }
 
     /**
+     * Erases items range from map.
+     *
+     * @param first first item to erase.
+     * @param first last item to erase.
+     * @return next after deleted item iterator.
+     */
+    Iterator Erase(ConstIterator first, ConstIterator last) override { return mItems.Erase(first, last); }
+
+    /**
+     * Erases item from map.
+     *
+     * @param it item to erase.
+     * @return next after deleted item iterator.
+     */
+    Iterator Erase(ConstIterator it) override { return mItems.Erase(it); }
+
+    /**
      * Iterators to the beginning / end of the map
      */
-    Pair<Key, Value>*       begin() { return mItems.begin(); }
-    Pair<Key, Value>*       end() { return mItems.end(); }
-    const Pair<Key, Value>* begin() const { return mItems.begin(); }
-    const Pair<Key, Value>* end() const { return mItems.end(); }
+    Iterator      begin() override { return mItems.begin(); }
+    Iterator      end() override { return mItems.end(); }
+    ConstIterator begin() const override { return mItems.begin(); }
+    ConstIterator end() const override { return mItems.end(); }
 
 protected:
-    explicit Map(Array<Pair<Key, Value>>& array)
+    explicit Map(Array<ValueType>& array)
         : mItems(array)
     {
     }
 
 private:
-    Array<Pair<Key, Value>>& mItems;
+    Array<ValueType>& mItems;
 };
 
 /**
@@ -217,6 +277,19 @@ public:
     StaticMap()
         : Map<Key, Value>(mArray)
     {
+    }
+
+    StaticMap(const StaticMap& map)
+        : Map<Key, Value>(mArray)
+        , mArray(map.mArray)
+    {
+    }
+
+    StaticMap& operator=(const StaticMap& map)
+    {
+        mArray = map.mArray;
+
+        return *this;
     }
 
 private:

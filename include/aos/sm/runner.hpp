@@ -12,10 +12,7 @@
 #include "aos/common/tools/noncopyable.hpp"
 #include "aos/common/types.hpp"
 
-namespace aos {
-namespace sm {
-namespace runner {
-
+namespace aos::sm::runner {
 /**
  * Instance run status.
  */
@@ -23,6 +20,25 @@ struct RunStatus {
     StaticString<cInstanceIDLen> mInstanceID;
     InstanceRunState             mState;
     Error                        mError;
+
+    /**
+     * Compares run statuses.
+     *
+     * @param other run status to compare.
+     * @return bool.
+     */
+    bool operator==(const RunStatus& other) const
+    {
+        return mInstanceID == other.mInstanceID && mState == other.mState && mError == other.mError;
+    }
+
+    /**
+     * Compares run statuses.
+     *
+     * @param other run status to compare.
+     * @return bool.
+     */
+    bool operator!=(const RunStatus& other) const { return !(*this == other); }
 };
 
 /**
@@ -35,9 +51,11 @@ public:
      *
      * @param instanceID instance ID.
      * @param runtimeDir directory with runtime spec.
+     * @param runParams runtime parameters.
      * @return RunStatus.
      */
-    virtual RunStatus StartInstance(const String& instanceID, const String& runtimeDir) = 0;
+    virtual RunStatus StartInstance(const String& instanceID, const String& runtimeDir, const RunParameters& runParams)
+        = 0;
 
     /**
      * Stops instance.
@@ -72,8 +90,6 @@ public:
     virtual ~RunStatusReceiverItf() = default;
 };
 
-} // namespace runner
-} // namespace sm
-} // namespace aos
+} // namespace aos::sm::runner
 
 #endif

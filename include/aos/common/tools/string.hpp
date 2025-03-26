@@ -65,10 +65,27 @@ public:
      */
     String& operator=(const String& str)
     {
-        Array::operator=(str);
-        *end() = 0;
+        [[maybe_unused]] auto err = Assign(str);
+        assert(err.IsNone());
 
         return *this;
+    }
+
+    /**
+     * Assigns string to string.
+     *
+     * @param str string.
+     * @return Error.
+     */
+    Error Assign(const String& str)
+    {
+        if (auto err = Array::Assign(str); !err.IsNone()) {
+            return err;
+        }
+
+        *end() = 0;
+
+        return ErrorEnum::eNone;
     }
 
     /**
@@ -77,6 +94,19 @@ public:
      * @return const char* C string.
      */
     const char* CStr() const { return Get(); }
+
+    /**
+     * Rebinds internal buffer to another string buffer.
+     *
+     * @param string another string instance.
+     */
+    void Rebind(const String& string)
+    {
+        Array::Rebind(string);
+        if (*end()) {
+            *end() = 0;
+        }
+    }
 
     /**
      * Sets new string size.
@@ -110,8 +140,25 @@ public:
     String& Append(const String& str)
     {
         [[maybe_unused]] auto err = Array::Insert(end(), str.begin(), str.end());
-        *end()                    = 0;
         assert(err.IsNone());
+
+        *end() = 0;
+
+        return *this;
+    }
+
+    /**
+     * Prepends string.
+     *
+     * @param str string to prepend.
+     * @return String&.
+     */
+    String& Prepend(const String& str)
+    {
+        [[maybe_unused]] auto err = Array::Insert(begin(), str.begin(), str.end());
+        assert(err.IsNone());
+
+        *end() = 0;
 
         return *this;
     }
@@ -127,7 +174,8 @@ public:
     Error Insert(char* pos, const char* from, const char* till)
     {
         auto err = Array::Insert(pos, from, till);
-        *end()   = 0;
+
+        *end() = 0;
 
         return err;
     }
@@ -167,36 +215,44 @@ public:
      * Removes leading characters.
      *
      * @param chars characters to be removed.
+     * @return String&.
      */
-    void LeftTrim(const String& chars)
+    String& LeftTrim(const String& chars)
     {
         auto newStart = 0U;
 
         while (newStart < Size()) {
-            if (chars.Find((*this)[newStart]).mError.IsNone()) {
+            if (chars.Find((*this)[newStart]) != chars.end()) {
                 newStart++;
             } else {
                 break;
             }
         }
 
-        Remove(begin(), begin() + newStart);
+        [[maybe_unused]] auto err = Remove(begin(), begin() + newStart);
+        assert(err.IsNone());
+
+        return *this;
     }
 
     /**
      * Removes trailing characters.
      *
      * @param chars characters to be removed.
+     * @return String&.s
      */
-    void RightTrim(const String& chars)
+    String& RightTrim(const String& chars)
     {
         while (Size() > 0) {
-            if (chars.Find(Back().mValue).mError.IsNone()) {
-                PopBack();
+            if (chars.Find(Back()) != chars.end()) {
+                [[maybe_unused]] auto err = PopBack();
+                assert(err.IsNone());
             } else {
                 break;
             }
         }
+
+        return *this;
     }
 
     /**
@@ -204,10 +260,86 @@ public:
      *
      * @param chars characters to be removed.
      */
-    void Trim(const String& chars)
+    String& Trim(const String& chars)
     {
         LeftTrim(chars);
         RightTrim(chars);
+
+        return *this;
+    }
+
+    /**
+     * Converts string to lower case.
+     *
+     * @return String&.
+     */
+    String& ToLower()
+    {
+        for (auto& ch : *this) {
+            ch = static_cast<char>(tolower(ch));
+        }
+
+        return *this;
+    }
+
+    /**
+     * Converts string to upper case.
+     *
+     * @return String&
+     */
+    String& ToUpper()
+    {
+        for (auto& ch : *this) {
+            ch = static_cast<char>(toupper(ch));
+        }
+
+        return *this;
+    }
+
+    /**
+     * Replaces n occurrences of substring with new substring.
+     *
+     * @param oldSubstr old substring.
+     * @param newSubstr new substring.
+     * @param n max number of occurrences to replace.
+     * @return Error.
+     */
+    Error Replace(const String& oldSubstr, const String& newSubstr, size_t n = 0)
+    {
+        for (size_t i = 0; i < n || n == 0; i++) {
+            size_t oldPos = 0;
+            Error  err;
+
+            Tie(oldPos, err) = FindSubstr(oldPos, oldSubstr);
+            if (!err.IsNone()) {
+                if (err.Is(ErrorEnum::eNotFound)) {
+                    return ErrorEnum::eNone;
+                }
+
+                return err;
+            }
+
+            for (size_t j = 0; j < Min(oldSubstr.Size(), newSubstr.Size()); j++) {
+                (*this)[oldPos + j] = newSubstr[j];
+            }
+
+            if (oldSubstr.Size() > newSubstr.Size()) {
+                if (err = Remove(begin() + oldPos + newSubstr.Size(), begin() + oldPos + oldSubstr.Size());
+                    !err.IsNone()) {
+                    return err;
+                }
+            }
+
+            if (oldSubstr.Size() < newSubstr.Size()) {
+                if (err = Insert(
+                        begin() + oldPos + oldSubstr.Size(), newSubstr.begin() + oldSubstr.Size(), newSubstr.end());
+                    !err.IsNone()) {
+                    return err;
+                }
+            }
+        }
+
+        return ErrorEnum::eNone;
     }
 
     /**
@@ -233,6 +365,38 @@ public:
      * @return bool.
      */
     bool operator!=(const String& str) const { return Array::operator!=(str); };
+
+    /**
+     * Checks if str is less than another string.
+     *
+     * @param str string to compare with.
+     * @return bool.
+     */
+    bool operator<(const String& str) const { return strcmp(CStr(), str.CStr()) < 0; }
+
+    /**
+     * Checks if str is less or equal to another string.
+     *
+     * @param str string to compare with.
+     * @return bool
+     */
+    bool operator<=(const String& str) const { return strcmp(CStr(), str.CStr()) <= 0; }
+
+    /**
+     * Checks if str is greater than another string.
+     *
+     * @param str string to compare with.
+     * @return bool.
+     */
+    bool operator>(const String& str) const { return strcmp(CStr(), str.CStr()) > 0; }
+
+    /**
+     * Checks if str is greater or equal to another string.
+     *
+     * @param str string to compare with.
+     * @return bool.
+     */
+    bool operator>=(const String& str) const { return strcmp(CStr(), str.CStr()) >= 0; }
 
     /**
      * Checks if C string equals to string.
@@ -538,12 +702,12 @@ public:
      * @return Error.
      */
     template <typename... Args>
-    Error Format(const char* format, Args... args)
+    Error Format(const String& format, Args... args)
     {
         Clear();
 
         // cppcheck-suppress wrongPrintfScanfArgNum
-        auto ret = snprintf(Get(), MaxSize() + 1, format, args...);
+        auto ret = snprintf(Get(), MaxSize() + 1, format.CStr(), args...);
         if (ret < 0) {
             return ret;
         }
@@ -561,6 +725,10 @@ public:
      */
     RetWithError<size_t> FindSubstr(size_t startPos, const String& substr) const
     {
+        if (substr.Size() > Size()) {
+            return {Size(), ErrorEnum::eNotFound};
+        }
+
         for (size_t i = startPos; i < Size() - substr.Size(); i++) {
             const auto chunk = Array<char>(CStr() + i, substr.Size());
 

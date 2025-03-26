@@ -12,6 +12,7 @@
 #include <cstdint>
 #include <stdlib.h>
 
+#include "aos/common/tools/log.hpp"
 #include "aos/common/tools/utils.hpp"
 
 namespace aos {
@@ -99,6 +100,42 @@ public:
     Variant() = default;
 
     /**
+     * Constructs object instance.
+     *
+     * @param args... argument list for constructor of a new object.
+     */
+    template <typename T, typename = EnableIf<(GetTypeIndex<T, VarArgs...>::Value != -1)>>
+    explicit Variant(const T& val)
+    {
+        SetValue(val);
+    }
+
+    /**
+     * Copy constructor.
+     *
+     * @param other variant to copy from.
+     */
+    // cppcheck-suppress uninitMemberVar
+    Variant(const Variant& other) { CopyObject(other); }
+
+    /**
+     * Assignment operator.
+     *
+     * @param other variant to copy from.
+     * @return Variant&.
+     */
+    // cppcheck-suppress uninitMemberVar
+    // cppcheck-suppress operatorEqVarError
+    Variant& operator=(const Variant& other)
+    {
+        if (this != &other) {
+            CopyObject(other);
+        }
+
+        return *this;
+    }
+
+    /**
      * Sets new variant value.
      *
      * @param args... argument list for constructor of a new object.
@@ -109,6 +146,21 @@ public:
         DestroyObject();
 
         new (mBuffer) T(args...);
+
+        mTypeIndex = GetTypeIndex<T, VarArgs...>::Value;
+    }
+
+    /**
+     * Sets new variant value.
+     *
+     * @param args... argument list for constructor of a new object.
+     */
+    template <typename T, typename = EnableIf<(GetTypeIndex<T, VarArgs...>::Value != -1)>>
+    void SetValue(const T& value)
+    {
+        DestroyObject();
+
+        new (mBuffer) T(value);
 
         mTypeIndex = GetTypeIndex<T, VarArgs...>::Value;
     }
@@ -125,6 +177,20 @@ public:
         assert(mTypeIndex == cTypeIndex);
 
         return *reinterpret_cast<T*>(mBuffer);
+    }
+
+    /**
+     * Returns a value based on its type.
+     *
+     * @tparam T type to be returned.
+     */
+    template <typename T>
+    const T& GetValue() const
+    {
+        [[maybe_unused]] static constexpr auto cTypeIndex = GetTypeIndex<T, VarArgs...>::Value;
+        assert(mTypeIndex == cTypeIndex);
+
+        return *reinterpret_cast<const T*>(mBuffer);
     }
 
     /**
@@ -166,12 +232,69 @@ public:
     }
 
     /**
+     * Compares two variant objects.
+     *
+     * @param other input variant object.
+     * @return bool.
+     */
+    bool operator==(const Variant& other) const
+    {
+        if (mTypeIndex != other.mTypeIndex) {
+            return false;
+        }
+
+        return ApplyVisitor(EqualsVisitor {other});
+    }
+
+    /**
+     * Compares two variant objects.
+     *
+     * @param other input variant object.
+     * @return bool.
+     */
+    bool operator!=(const Variant& other) const { return !(*this == other); }
+
+    /**
+     * Outputs variant object to log.
+     *
+     * @param log log to output.
+     * @param variant variant object to log.
+     * @return Log&.
+     */
+    friend Log& operator<<(Log& log, const Variant& variant)
+    {
+        if (variant.mTypeIndex == cInvalidTypeIndex) {
+            return log << "{}";
+        }
+
+        // cppcheck-suppress returnTempReference
+        return variant.ApplyVisitor(LogVisitor {log});
+    }
+
+    /**
      * Destroys object instance.
      */
     ~Variant() { DestroyObject(); }
 
 private:
     static constexpr int cInvalidTypeIndex = -1;
+
+    class LogVisitor : public StaticVisitor<Log&> {
+    public:
+        explicit LogVisitor(Log& log)
+            : mLog(log)
+        {
+        }
+
+        template <typename T>
+        Log& Visit(const T& val) const
+        {
+            return mLog << val;
+        }
+
+    private:
+        Log& mLog;
+    };
 
     struct ObjectDestroyer : StaticVisitor<void> {
         template <typename T>
@@ -181,11 +304,50 @@ private:
         }
     };
 
+    struct ObjectCopier : StaticVisitor<void> {
+        explicit ObjectCopier(Variant* variant)
+            : mVariant(variant)
+        {
+        }
+
+        template <typename T>
+        void Visit(const T& val) const
+        {
+            mVariant->SetValue<T>(val);
+        }
+
+        Variant* mVariant;
+    };
+
+    struct EqualsVisitor : StaticVisitor<bool> {
+        explicit EqualsVisitor(const Variant& other)
+            : mOther(other)
+        {
+        }
+
+        template <typename T>
+        bool Visit(const T& val) const
+        {
+            return val == mOther.GetValue<T>();
+        }
+
+        const Variant& mOther;
+    };
+
     void DestroyObject()
     {
         if (mTypeIndex != cInvalidTypeIndex) {
             ApplyVisitor(ObjectDestroyer {});
             mTypeIndex = cInvalidTypeIndex;
+        }
+    }
+
+    void CopyObject(const Variant& other)
+    {
+        DestroyObject();
+
+        if (other.mTypeIndex != cInvalidTypeIndex) {
+            other.ApplyVisitor(ObjectCopier {this});
         }
     }
 

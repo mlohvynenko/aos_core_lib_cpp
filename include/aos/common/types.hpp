@@ -15,6 +15,7 @@
 #include "aos/common/tools/error.hpp"
 #include "aos/common/tools/fs.hpp"
 #include "aos/common/tools/log.hpp"
+#include "aos/common/tools/optional.hpp"
 
 namespace aos {
 
@@ -27,6 +28,11 @@ constexpr auto cProviderIDLen = AOS_CONFIG_TYPES_PROVIDER_ID_LEN;
  * Service ID len.
  */
 constexpr auto cServiceIDLen = AOS_CONFIG_TYPES_SERVICE_ID_LEN;
+
+/**
+ * Max number of service providers.
+ */
+static constexpr auto cMaxNumServiceProviders = AOS_CONFIG_TYPES_MAX_NUM_SERVICE_PROVIDERS;
 
 /*
  * Subject ID len.
@@ -230,11 +236,6 @@ constexpr auto cMaxNumDNSServers = AOS_CONFIG_TYPES_MAX_NUM_DNS_SERVERS;
 constexpr auto cMaxNumFirewallRules = AOS_CONFIG_TYPES_MAX_NUM_FIREWALL_RULES;
 
 /**
- * Max number of networks.
- */
-constexpr auto cMaxNumNetworks = AOS_CONFIG_TYPES_MAX_NUM_NETWORKS;
-
-/**
  * Host name len.
  */
 constexpr auto cHostNameLen = AOS_CONFIG_TYPES_HOST_NAME_LEN;
@@ -262,7 +263,7 @@ constexpr auto cGroupNameLen = AOS_CONFIG_TYPES_GROUP_NAME_LEN;
 /**
  * Max number of groups.
  */
-constexpr auto cMaxNumGroups = 8;
+constexpr auto cMaxNumGroups = AOS_CONFIG_TYPES_MAX_NUM_GROUPS;
 
 /**
  * Max number of file system mounts.
@@ -275,6 +276,18 @@ constexpr auto cMaxNumFSMounts = AOS_CONFIG_TYPES_MAX_NUM_FS_MOUNTS;
 constexpr auto cEnvVarNameLen = AOS_CONFIG_TYPES_ENV_VAR_NAME_LEN;
 
 /**
+ * Environment variable value len.
+ */
+constexpr auto cEnvVarValueLen = AOS_CONFIG_TYPES_ENV_VAR_VALUE_LEN;
+
+/**
+ * Environment variable len.
+ *
+ * Consists of name and value plus equal sign.
+ */
+constexpr auto cEnvVarLen = cEnvVarNameLen + cEnvVarValueLen + 1;
+
+/**
  * Max number of environment variables.
  */
 constexpr auto cMaxNumEnvVariables = AOS_CONFIG_TYPES_MAX_NUM_ENV_VARIABLES;
@@ -285,9 +298,9 @@ constexpr auto cMaxNumEnvVariables = AOS_CONFIG_TYPES_MAX_NUM_ENV_VARIABLES;
 constexpr auto cMaxNumHosts = AOS_CONFIG_TYPES_MAX_NUM_HOSTS;
 
 /**
- * Max number of devices.
+ * Max number of node's devices.
  */
-constexpr auto cMaxNumDevices = AOS_CONFIG_TYPES_MAX_NUM_DEVICES;
+constexpr auto cMaxNumNodeDevices = AOS_CONFIG_TYPES_MAX_NUM_NODE_DEVICES;
 
 /**
  * Max number of node's resources.
@@ -303,6 +316,61 @@ constexpr auto cLabelNameLen = AOS_CONFIG_TYPES_LABEL_NAME_LEN;
  * Max number of node's labels.
  */
 constexpr auto cMaxNumNodeLabels = AOS_CONFIG_TYPES_MAX_NUM_NODE_LABELS;
+
+/**
+ * Max subnet len.
+ */
+static constexpr auto cSubnetLen = AOS_CONFIG_TYPES_SUBNET_LEN;
+
+/**
+ * Max MAC len.
+ */
+static constexpr auto cMacLen = AOS_CONFIG_TYPES_MAC_LEN;
+
+/**
+ * Max iptables chain name length.
+ */
+static constexpr auto cIptablesChainNameLen = AOS_CONFIG_TYPES_IPTABLES_CHAIN_LEN;
+
+/**
+ * Max CNI interface name length.
+ */
+static constexpr auto cInterfaceLen = AOS_CONFIG_TYPES_INTERFACE_NAME_LEN;
+
+/**
+ *  Max num runners.
+ */
+static constexpr auto cMaxNumRunners = AOS_CONFIG_TYPES_MAX_NUM_RUNNERS;
+
+/**
+ * Runner name max length.
+ */
+static constexpr auto cRunnerNameLen = AOS_CONFIG_TYPES_RUNNER_NAME_LEN;
+
+/**
+ * Permissions length.
+ */
+static constexpr auto cPermissionsLen = AOS_CONFIG_TYPES_PERMISSIONS_LEN;
+
+/**
+ * Function name length.
+ */
+static constexpr auto cFunctionLen = AOS_CONFIG_TYPES_FUNCTION_LEN;
+
+/**
+ * Max number of functions for functional service.
+ */
+static constexpr auto cFunctionsMaxCount = AOS_CONFIG_TYPES_FUNCTIONS_MAX_COUNT;
+
+/**
+ * Functional service name length.
+ */
+static constexpr auto cFuncServiceLen = AOS_CONFIG_TYPES_FUNC_SERVICE_LEN;
+
+/**
+ * Maximum number of functional services.
+ */
+static constexpr auto cFuncServiceMaxCount = AOS_CONFIG_TYPES_FUNC_SERVICE_MAX_COUNT;
 
 /**
  * Instance identification.
@@ -380,12 +448,12 @@ struct FirewallRule {
  * Networks parameters.
  */
 struct NetworkParameters {
-    StaticString<cHostNameLen>                            mNetworkID;
-    StaticString<cIPLen>                                  mSubnet;
-    StaticString<cIPLen>                                  mIP;
-    uint64_t                                              mVlanID;
-    StaticArray<StaticString<cURLLen>, cMaxNumDNSServers> mDNSServers;
-    StaticArray<FirewallRule, cMaxNumFirewallRules>       mFirewallRules;
+    StaticString<cHostNameLen>                                 mNetworkID;
+    StaticString<cSubnetLen>                                   mSubnet;
+    StaticString<cIPLen>                                       mIP;
+    uint64_t                                                   mVlanID;
+    StaticArray<StaticString<cHostNameLen>, cMaxNumDNSServers> mDNSServers;
+    StaticArray<FirewallRule, cMaxNumFirewallRules>            mFirewallRules;
 
     /**
      * Compares network parameters.
@@ -414,11 +482,11 @@ struct NetworkParameters {
  */
 struct InstanceInfo {
     InstanceIdent              mInstanceIdent;
-    NetworkParameters          mNetworkParameters;
     uint32_t                   mUID;
     uint64_t                   mPriority;
     StaticString<cFilePathLen> mStoragePath;
     StaticString<cFilePathLen> mStatePath;
+    NetworkParameters          mNetworkParameters;
 
     /**
      * Compares instance info.
@@ -428,9 +496,9 @@ struct InstanceInfo {
      */
     bool operator==(const InstanceInfo& instance) const
     {
-        return mInstanceIdent == instance.mInstanceIdent && mNetworkParameters == instance.mNetworkParameters
-            && mUID == instance.mUID && mPriority == instance.mPriority && mStoragePath == instance.mStoragePath
-            && mStatePath == instance.mStatePath;
+        return mInstanceIdent == instance.mInstanceIdent && mUID == instance.mUID && mPriority == instance.mPriority
+            && mStoragePath == instance.mStoragePath && mStatePath == instance.mStatePath
+            && mNetworkParameters == instance.mNetworkParameters;
     }
 
     /**
@@ -452,11 +520,11 @@ using InstanceInfoStaticArray = StaticArray<InstanceInfo, cMaxNumInstances>;
  */
 class InstanceRunStateType {
 public:
-    enum class Enum { eActive, eFailed, eNumStates };
+    enum class Enum { eFailed, eActive, eNumStates };
 
     static const Array<const char* const> GetStrings()
     {
-        static const char* const sInstanceRunStateStrings[] = {"active", "failed"};
+        static const char* const sInstanceRunStateStrings[] = {"failed", "active"};
 
         return Array<const char* const>(sInstanceRunStateStrings, ArraySize(sInstanceRunStateStrings));
     };
@@ -501,17 +569,195 @@ struct InstanceStatus {
 using InstanceStatusStaticArray = StaticArray<InstanceStatus, cMaxNumInstances>;
 
 /**
+ * Item status type.
+ */
+class ItemStatusType {
+public:
+    enum class Enum {
+        eUnknown,
+        ePending,
+        eDownloading,
+        eDownloaded,
+        eInstalling,
+        eInstalled,
+        eRemoving,
+        eRemoved,
+        eError,
+    };
+
+    static const Array<const char* const> GetStrings()
+    {
+        static const char* const sStrings[] = {
+            "unknown",
+            "pending",
+            "downloading",
+            "downloaded",
+            "installing",
+            "installed",
+            "removing",
+            "removed",
+            "error",
+        };
+
+        return Array<const char* const>(sStrings, ArraySize(sStrings));
+    };
+};
+
+using ItemStatusEnum = ItemStatusType::Enum;
+using ItemStatus     = EnumStringer<ItemStatusType>;
+
+/**
+ * Service status.
+ */
+struct ServiceStatus {
+    /**
+     * Default constructor.
+     */
+    ServiceStatus() = default;
+
+    /**
+     * Construct a new service status object
+     *
+     * @param serviceID service ID.
+     * @param version service version.
+     * @param status service status.
+     * @param error service error.
+     */
+    ServiceStatus(const String& serviceID, const String& version, ItemStatus status = ItemStatusEnum::eUnknown,
+        const Error& error = ErrorEnum::eNone)
+        : mServiceID(serviceID)
+        , mVersion(version)
+        , mStatus(status)
+        , mError(error)
+    {
+    }
+
+    /**
+     * Sets error with specified status.
+     *
+     * @param error error.
+     * @param status status.
+     */
+    void SetError(const Error& error, ItemStatus status = ItemStatusEnum::eError)
+    {
+        mError  = error;
+        mStatus = status;
+    }
+
+    StaticString<cServiceIDLen> mServiceID;
+    StaticString<cVersionLen>   mVersion;
+    ItemStatus                  mStatus;
+    Error                       mError;
+
+    /**
+     * Compares service status.
+     *
+     * @param service status to compare.
+     * @return bool.
+     */
+    bool operator==(const ServiceStatus& service) const
+    {
+        return mServiceID == service.mServiceID && mVersion == service.mVersion && mStatus == service.mStatus
+            && mError == service.mError;
+    }
+
+    /**
+     * Compares service status.
+     *
+     * @param service status to compare.
+     * @return bool.
+     */
+    bool operator!=(const ServiceStatus& service) const { return !operator==(service); }
+};
+
+/**
+ * Service status static array.
+ */
+using ServiceStatusStaticArray = StaticArray<ServiceStatus, cMaxNumServices>;
+
+/**
+ * Layer status.
+ */
+struct LayerStatus {
+    /**
+     * Default constructor.
+     */
+    LayerStatus() = default;
+
+    /**
+     * Construct a new layer status object
+     *
+     * @param layerID layer ID.
+     * @param digest layer digest.
+     * @param version layer version.
+     * @param status layer status.
+     * @param error layer error.
+     */
+    LayerStatus(const String& layerID, const String& digest, const String& version,
+        ItemStatus status = ItemStatusEnum::eUnknown, const Error& error = ErrorEnum::eNone)
+        : mLayerID(layerID)
+        , mDigest(digest)
+        , mVersion(version)
+        , mStatus(status)
+        , mError(error)
+    {
+    }
+
+    /**
+     * Sets error with specified status.
+     *
+     * @param error error.
+     * @param status status.
+     */
+    void SetError(const Error& error, ItemStatus status = ItemStatusEnum::eError)
+    {
+        mError  = error;
+        mStatus = status;
+    }
+
+    StaticString<cServiceIDLen>   mLayerID;
+    StaticString<cLayerDigestLen> mDigest;
+    StaticString<cVersionLen>     mVersion;
+    ItemStatus                    mStatus;
+    Error                         mError;
+
+    /**
+     * Compares layer status.
+     *
+     * @param layer layer status to compare.
+     * @return bool.
+     */
+    bool operator==(const LayerStatus& layer) const
+    {
+        return mLayerID == layer.mLayerID && mDigest == layer.mDigest && mVersion == layer.mVersion
+            && mStatus == layer.mStatus && mError == layer.mError;
+    }
+
+    /**
+     * Compares layer status.
+     *
+     * @param layer layer status to compare.
+     * @return bool.
+     */
+    bool operator!=(const LayerStatus& layer) const { return !operator==(layer); }
+};
+
+/**
+ * Layer status static array.
+ */
+using LayerStatusStaticArray = StaticArray<LayerStatus, cMaxNumLayers>;
+
+/**
  * Service info.
  */
-
 struct ServiceInfo {
-    StaticString<cServiceIDLen>            mServiceID;
-    StaticString<cProviderIDLen>           mProviderID;
-    StaticString<cVersionLen>              mVersion;
-    uint32_t                               mGID;
-    StaticString<cURLLen>                  mURL;
-    aos::StaticArray<uint8_t, cSHA256Size> mSHA256;
-    size_t                                 mSize;
+    StaticString<cServiceIDLen>       mServiceID;
+    StaticString<cProviderIDLen>      mProviderID;
+    StaticString<cVersionLen>         mVersion;
+    uint32_t                          mGID;
+    StaticString<cURLLen>             mURL;
+    StaticArray<uint8_t, cSHA256Size> mSHA256;
+    size_t                            mSize;
 
     /**
      * Compares service info.
@@ -545,12 +791,12 @@ using ServiceInfoStaticArray = StaticArray<ServiceInfo, cMaxNumServices>;
 
 // LayerInfo layer info.
 struct LayerInfo {
-    StaticString<cLayerIDLen>              mLayerID;
-    StaticString<cLayerDigestLen>          mLayerDigest;
-    StaticString<cVersionLen>              mVersion;
-    StaticString<cURLLen>                  mURL;
-    aos::StaticArray<uint8_t, cSHA256Size> mSHA256;
-    size_t                                 mSize;
+    StaticString<cLayerIDLen>         mLayerID;
+    StaticString<cLayerDigestLen>     mLayerDigest;
+    StaticString<cVersionLen>         mVersion;
+    StaticString<cURLLen>             mURL;
+    StaticArray<uint8_t, cSHA256Size> mSHA256;
+    size_t                            mSize;
 
     /**
      * Compares layer info.
@@ -581,37 +827,76 @@ using LayerInfoStaticArray = StaticArray<LayerInfo, cMaxNumLayers>;
 /**
  * File system mount.
  */
-struct FileSystemMount {
-    StaticString<cFilePathLen>                                          mDestination;
-    StaticString<cFSMountTypeLen>                                       mType;
-    StaticString<cFilePathLen>                                          mSource;
-    StaticArray<StaticString<cFSMountOptionLen>, cFSMountMaxNumOptions> mOptions;
+struct Mount {
+    /**
+     * Crates mount.
+     */
+    Mount() = default;
 
     /**
-     * Compares file system mount.
+     * Creates mount.
      *
-     * @param fsMount file system mount to compare.
-     * @return bool.
+     * @param source source.
+     * @param destination destination.
+     * @param mType mount type.
+     * @param options mount options separated by comma e.g. "ro,bind".
      */
-    bool operator==(const FileSystemMount& fsMount) const
+    Mount(const String& source, const String& destination, const String& mType, const String& options = "")
+        : mDestination(destination)
+        , mType(mType)
+        , mSource(source)
     {
-        return mDestination == fsMount.mDestination && mType == fsMount.mType && mSource == fsMount.mSource
-            && mOptions == fsMount.mOptions;
+        [[maybe_unused]] auto err = options.Split(mOptions, ',');
+        assert(err.IsNone());
     }
 
     /**
      * Compares file system mount.
      *
-     * @param fsMount file system mount to compare.
+     * @param mount file system mount to compare.
      * @return bool.
      */
-    bool operator!=(const FileSystemMount& fsMount) const { return !operator==(fsMount); }
+    bool operator==(const Mount& mount) const
+    {
+        return mDestination == mount.mDestination && mType == mount.mType && mSource == mount.mSource
+            && mOptions == mount.mOptions;
+    }
+
+    /**
+     * Compares file system mount.
+     *
+     * @param mount file system mount to compare.
+     * @return bool.
+     */
+    bool operator!=(const Mount& mount) const { return !operator==(mount); }
+
+    StaticString<cFilePathLen>                                          mDestination;
+    StaticString<cFSMountTypeLen>                                       mType;
+    StaticString<cFilePathLen>                                          mSource;
+    StaticArray<StaticString<cFSMountOptionLen>, cFSMountMaxNumOptions> mOptions;
 };
 
 /**
  * Host.
  */
 struct Host {
+    /**
+     * Default constructor.
+     */
+    Host() = default;
+
+    /**
+     * Constructs host.
+     *
+     * @param ip IP.
+     * @param hostname hostname.
+     */
+    Host(const String& ip, const String& hostname)
+        : mIP(ip)
+        , mHostname(hostname)
+    {
+    }
+
     StaticString<cIPLen>       mIP;
     StaticString<cHostNameLen> mHostname;
 
@@ -637,7 +922,7 @@ struct Host {
  */
 struct DeviceInfo {
     StaticString<cDeviceNameLen>                                  mName;
-    int                                                           mSharedCount {0};
+    size_t                                                        mSharedCount {0};
     StaticArray<StaticString<cGroupNameLen>, cMaxNumGroups>       mGroups;
     StaticArray<StaticString<cDeviceNameLen>, cMaxNumHostDevices> mHostDevices;
 
@@ -663,14 +948,19 @@ struct DeviceInfo {
 };
 
 /**
+ * Env vars static array.
+ */
+using EnvVarsArray = StaticArray<StaticString<cEnvVarLen>, cMaxNumEnvVariables>;
+
+/**
  * Resource info.
  */
 struct ResourceInfo {
-    StaticString<cResourceNameLen>                                 mName;
-    StaticArray<StaticString<cGroupNameLen>, cMaxNumGroups>        mGroups;
-    StaticArray<FileSystemMount, cMaxNumFSMounts>                  mMounts;
-    StaticArray<StaticString<cEnvVarNameLen>, cMaxNumEnvVariables> mEnv;
-    StaticArray<Host, cMaxNumHosts>                                mHosts;
+    StaticString<cResourceNameLen>                          mName;
+    StaticArray<StaticString<cGroupNameLen>, cMaxNumGroups> mGroups;
+    StaticArray<Mount, cMaxNumFSMounts>                     mMounts;
+    EnvVarsArray                                            mEnv;
+    StaticArray<Host, cMaxNumHosts>                         mHosts;
 
     /**
      * Compares resource info.
@@ -694,14 +984,127 @@ struct ResourceInfo {
 };
 
 /**
+ * Alert rule percents.
+ */
+struct AlertRulePercents {
+    Duration mMinTimeout;
+    double   mMinThreshold;
+    double   mMaxThreshold;
+
+    /**
+     * Compares alert rule percents.
+     *
+     * @param rule alert rule percents to compare.
+     * @return bool.
+     */
+    bool operator==(const AlertRulePercents& rule) const
+    {
+        return mMinTimeout == rule.mMinTimeout && mMinThreshold == rule.mMinThreshold
+            && mMaxThreshold == rule.mMaxThreshold;
+    }
+
+    /**
+     * Compares alert rule percents.
+     *
+     * @param rule alert rule percents to compare.
+     * @return bool.
+     */
+    bool operator!=(const AlertRulePercents& rule) const { return !operator==(rule); }
+};
+
+struct AlertRulePoints {
+    Duration mMinTimeout;
+    uint64_t mMinThreshold;
+    uint64_t mMaxThreshold;
+
+    /**
+     * Compares alert rule points.
+     *
+     * @param rule alert rule points to compare.
+     * @return bool.
+     */
+    bool operator==(const AlertRulePoints& rule) const
+    {
+        return mMinTimeout == rule.mMinTimeout && mMinThreshold == rule.mMinThreshold
+            && mMaxThreshold == rule.mMaxThreshold;
+    }
+
+    /**
+     * Compares alert rule points.
+     *
+     * @param rule alert rule points to compare.
+     * @return bool.
+     */
+    bool operator!=(const AlertRulePoints& rule) const { return !operator==(rule); }
+};
+
+/**
+ * Partition alert rule.
+ */
+struct PartitionAlertRule : public AlertRulePercents {
+    StaticString<cPartitionNameLen> mName;
+
+    /**
+     * Compares partition alert rule.
+     *
+     * @param rule partition alert rule to compare.
+     * @return bool.
+     */
+    bool operator==(const PartitionAlertRule& rule) const
+    {
+        return mName == rule.mName && static_cast<const AlertRulePercents&>(*this) == rule;
+    }
+
+    /**
+     * Compares partition alert rule.
+     *
+     * @param rule partition alert rule to compare.
+     * @return bool.
+     */
+    bool operator!=(const PartitionAlertRule& rule) const { return !operator==(rule); }
+};
+
+/**
+ * Alert rules.
+ */
+struct AlertRules {
+    Optional<AlertRulePercents>                        mRAM;
+    Optional<AlertRulePercents>                        mCPU;
+    StaticArray<PartitionAlertRule, cMaxNumPartitions> mPartitions;
+    Optional<AlertRulePoints>                          mDownload;
+    Optional<AlertRulePoints>                          mUpload;
+
+    /**
+     * Compares alert rules.
+     *
+     * @param rules alert rules to compare.
+     * @return bool.
+     */
+    bool operator==(const AlertRules& rules) const
+    {
+        return mRAM == rules.mRAM && mCPU == rules.mCPU && mPartitions == rules.mPartitions
+            && mDownload == rules.mDownload && mUpload == rules.mUpload;
+    }
+
+    /**
+     * Compares alert rules.
+     *
+     * @param rules alert rules to compare.
+     * @return bool.
+     */
+    bool operator!=(const AlertRules& rules) const { return !operator==(rules); }
+};
+
+/**
  * Node config.
  */
 struct NodeConfig {
     StaticString<cNodeTypeLen>                                  mNodeType;
-    StaticArray<DeviceInfo, cMaxNumDevices>                     mDevices;
+    StaticArray<DeviceInfo, cMaxNumNodeDevices>                 mDevices;
     StaticArray<ResourceInfo, cMaxNumNodeResources>             mResources;
     StaticArray<StaticString<cLabelNameLen>, cMaxNumNodeLabels> mLabels;
     uint32_t                                                    mPriority {0};
+    Optional<AlertRules>                                        mAlertRules;
 
     /**
      * Compares node configs.
@@ -712,8 +1115,8 @@ struct NodeConfig {
     bool operator==(const NodeConfig& nodeConfig) const
     {
         return mNodeType == nodeConfig.mNodeType && mDevices == nodeConfig.mDevices
-            && mResources == nodeConfig.mResources && mLabels == nodeConfig.mLabels
-            && mPriority == nodeConfig.mPriority;
+            && mResources == nodeConfig.mResources && mLabels == nodeConfig.mLabels && mPriority == nodeConfig.mPriority
+            && mAlertRules == nodeConfig.mAlertRules;
     }
 
     /**
@@ -798,6 +1201,58 @@ struct CPUInfo {
 using CPUInfoStaticArray = StaticArray<CPUInfo, cMaxNumCPUs>;
 
 /**
+ * Node attribute enum.
+ */
+class NodeAttributeType {
+public:
+    enum class Enum {
+        eMainNode,
+        eAosComponents,
+        eNodeRunners,
+    };
+
+    static const Array<const char* const> GetStrings()
+    {
+        static const char* const sNodeStatusStrings[] = {
+            "MainNode",
+            "AosComponents",
+            "NodeRunners",
+        };
+
+        return Array<const char* const>(sNodeStatusStrings, ArraySize(sNodeStatusStrings));
+    };
+};
+
+using NodeAttributeEnum = NodeAttributeType::Enum;
+using NodeAttributeName = EnumStringer<NodeAttributeType>;
+
+/**
+ * Runner enum.
+ */
+class RunnerType {
+public:
+    enum class Enum {
+        eRUNC,
+        eCRUN,
+        eXRUN,
+    };
+
+    static const Array<const char* const> GetStrings()
+    {
+        static const char* const sNodeStatusStrings[] = {
+            "runc",
+            "crun",
+            "xrun",
+        };
+
+        return Array<const char* const>(sNodeStatusStrings, ArraySize(sNodeStatusStrings));
+    };
+};
+
+using RunnerEnum = RunnerType::Enum;
+using Runner     = EnumStringer<RunnerType>;
+
+/**
  * Node attribute.
  */
 struct NodeAttribute {
@@ -868,6 +1323,27 @@ struct NodeInfo {
     uint64_t                   mMaxDMIPS = 0;
     uint64_t                   mTotalRAM = 0;
 
+    Error GetRunners(Array<StaticString<cRunnerNameLen>>& runners) const
+    {
+        auto attr = mAttrs.FindIf([](const NodeAttribute& attr) {
+            return attr.mName == NodeAttributeName(NodeAttributeEnum::eNodeRunners).ToString();
+        });
+
+        if (attr == mAttrs.end()) {
+            return ErrorEnum::eNotFound;
+        }
+
+        if (auto err = attr->mValue.Split(runners, ','); !err.IsNone()) {
+            return err;
+        }
+
+        for (auto& runner : runners) {
+            runner.Trim(" ");
+        }
+
+        return ErrorEnum::eNone;
+    }
+
     /**
      * Compares node info.
      *
@@ -888,6 +1364,62 @@ struct NodeInfo {
      * @return bool.
      */
     bool operator!=(const NodeInfo& info) const { return !operator==(info); }
+};
+
+/**
+ * Service run parameters.
+ */
+struct RunParameters {
+    Duration mStartInterval;
+    Duration mRestartInterval;
+    long     mStartBurst;
+
+    /**
+     * Compares run parameters.
+     *
+     * @param params run parameters to compare.
+     * @return bool.
+     */
+    bool operator==(const RunParameters& params) const
+    {
+        return mStartInterval == params.mStartInterval && mRestartInterval == params.mRestartInterval
+            && mStartBurst == params.mStartBurst;
+    }
+
+    /**
+     * Compares run parameters.
+     *
+     * @param params run parameters to compare.
+     * @return bool.
+     */
+    bool operator!=(const RunParameters& params) const { return !operator==(params); }
+};
+
+/**
+ * Function permissions.
+ */
+struct FunctionPermissions {
+    StaticString<cFunctionLen>    mFunction;
+    StaticString<cPermissionsLen> mPermissions;
+
+    /**
+     * Compares permission key value.
+     *
+     * @param rhs object to compare.
+     * @return bool.
+     */
+    bool operator==(const FunctionPermissions& rhs)
+    {
+        return (mFunction == rhs.mFunction) && (mPermissions == rhs.mPermissions);
+    }
+};
+
+/**
+ * Function service permissions.
+ */
+struct FunctionServicePermissions {
+    StaticString<cFuncServiceLen>                        mName;
+    StaticArray<FunctionPermissions, cFunctionsMaxCount> mPermissions;
 };
 
 } // namespace aos

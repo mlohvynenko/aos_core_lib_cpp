@@ -7,12 +7,14 @@
 #ifndef AOS_NETWORKMANAGER_HPP_
 #define AOS_NETWORKMANAGER_HPP_
 
+#include "aos/common/tools/fs.hpp"
+#include "aos/common/tools/map.hpp"
+#include "aos/common/tools/thread.hpp"
 #include "aos/common/types.hpp"
+#include "aos/sm/cni.hpp"
 #include "aos/sm/config.hpp"
 
-namespace aos {
-namespace sm {
-namespace networkmanager {
+namespace aos::sm::networkmanager {
 
 /** @addtogroup sm Service Manager
  *  @{
@@ -29,9 +31,24 @@ static constexpr auto cMaxNumAliases = AOS_CONFIG_NETWORKMANAGER_MAX_NUM_ALIASES
 static constexpr auto cMaxNumExposedPorts = AOS_CONFIG_NETWORKMANAGER_MAX_NUM_EXPOSED_PORTS;
 
 /**
- * Network parameters set for service provider.
+ * Max number of hosts.
  */
-struct NetworkParameters {
+static constexpr auto cResolvConfLineLen = AOS_CONFIG_NETWORKMANAGER_RESOLV_CONF_LINE_LEN;
+
+/**
+ * Max exposed port len.
+ */
+static constexpr auto cExposedPortLen = cPortLen + cProtocolNameLen;
+
+/**
+ * Max number of hosts.
+ */
+static constexpr auto cMaxNumHosts = AOS_CONFIG_NETWORKMANAGER_MAX_NUM_HOSTS;
+
+/**
+ * Network information.
+ */
+struct NetworkInfo {
     StaticString<cHostNameLen> mNetworkID;
     StaticString<cIPLen>       mSubnet;
     StaticString<cIPLen>       mIP;
@@ -39,68 +56,24 @@ struct NetworkParameters {
     StaticString<cHostNameLen> mVlanIfName;
 
     /**
-     * Compares network parameters.
+     * Compares network information.
      *
-     * @param networkParams network parameters to compare.
+     * @param networkInfo network information to compare.
      * @return bool.
      */
-    bool operator==(const NetworkParameters& networkParams) const
+    bool operator==(const NetworkInfo& networkInfo) const
     {
-        return mNetworkID == networkParams.mNetworkID && mSubnet == networkParams.mSubnet && mIP == networkParams.mIP
-            && mVlanID == networkParams.mVlanID && mVlanIfName == networkParams.mVlanIfName;
+        return mNetworkID == networkInfo.mNetworkID && mSubnet == networkInfo.mSubnet && mIP == networkInfo.mIP
+            && mVlanID == networkInfo.mVlanID && mVlanIfName == networkInfo.mVlanIfName;
     }
 
     /**
-     * Compares network parameters.
+     * Compares network information.
      *
-     * @param networkParams network parameters to compare.
+     * @param networkInfo network information to compare.
      * @return bool.
      */
-    bool operator!=(const NetworkParameters& networkParams) const { return !operator==(networkParams); }
-};
-
-/**
- * Network parameters set for instance.
- */
-struct NetworkParams {
-    InstanceIdent                                              mInstanceIdent;
-    aos::NetworkParameters                                     mNetworkParameters;
-    StaticString<cHostNameLen>                                 mHostname;
-    StaticArray<StaticString<cHostNameLen>, cMaxNumAliases>    mAliases;
-    uint64_t                                                   mIngressKbit;
-    uint64_t                                                   mEgressKbit;
-    StaticArray<StaticString<cPortLen>, cMaxNumExposedPorts>   mExposedPorts;
-    StaticArray<Host, cMaxNumHosts>                            mHosts;
-    StaticArray<StaticString<cHostNameLen>, cMaxNumDNSServers> mDNSSevers;
-    StaticString<cFilePathLen>                                 mHostsFilePath;
-    StaticString<cFilePathLen>                                 mResolvConfFilePath;
-    uint64_t                                                   mUploadLimit;
-    uint64_t                                                   mDownloadLimit;
-
-    /**
-     * Compares network parameters.
-     *
-     * @param networkParams network parameters to compare.
-     * @return bool.
-     */
-    bool operator==(const NetworkParams& networkParams) const
-    {
-        return mInstanceIdent == networkParams.mInstanceIdent && mNetworkParameters == networkParams.mNetworkParameters
-            && mHostname == networkParams.mHostname && mAliases == networkParams.mAliases
-            && mIngressKbit == networkParams.mIngressKbit && mEgressKbit == networkParams.mEgressKbit
-            && mExposedPorts == networkParams.mExposedPorts && mHosts == networkParams.mHosts
-            && mDNSSevers == networkParams.mDNSSevers && mHostsFilePath == networkParams.mHostsFilePath
-            && mResolvConfFilePath == networkParams.mResolvConfFilePath && mUploadLimit == networkParams.mUploadLimit
-            && mDownloadLimit == networkParams.mDownloadLimit;
-    }
-
-    /**
-     * Compares network parameters.
-     *
-     * @param networkParams network parameters to compare.
-     * @return bool.
-     */
-    bool operator!=(const NetworkParams& networkParams) const { return !operator==(networkParams); }
+    bool operator!=(const NetworkInfo& networkInfo) const { return !operator==(networkInfo); }
 };
 
 /**
@@ -119,10 +92,10 @@ public:
     /**
      * Adds network info to storage.
      *
-     * @param info network info.
+     * @param info network information.
      * @return Error.
      */
-    virtual Error AddNetworkInfo(const NetworkParameters& info) = 0;
+    virtual Error AddNetworkInfo(const NetworkInfo& info) = 0;
 
     /**
      * Returns network information.
@@ -130,7 +103,7 @@ public:
      * @param networks[out] network information result.
      * @return Error.
      */
-    virtual Error GetNetworksInfo(Array<NetworkParameters>& networks) const = 0;
+    virtual Error GetNetworksInfo(Array<NetworkInfo>& networks) const = 0;
 
     /**
      * Sets traffic monitor data.
@@ -167,6 +140,73 @@ public:
 };
 
 /**
+ * Traffic period type.
+ */
+class TrafficPeriodType {
+public:
+    enum class Enum { eMinutePeriod, eHourPeriod, eDayPeriod, eMonthPeriod, eYearPeriod };
+
+    static const Array<const char* const> GetStrings()
+    {
+        static const char* const sTrafficPeriodStrings[] = {"minute", "hour", "day", "month", "year"};
+
+        return Array<const char* const>(sTrafficPeriodStrings, ArraySize(sTrafficPeriodStrings));
+    };
+};
+
+using TrafficPeriodEnum = TrafficPeriodType::Enum;
+using TrafficPeriod     = EnumStringer<TrafficPeriodType>;
+
+/**
+ * Instance network parameters.
+ */
+struct InstanceNetworkParameters {
+    InstanceIdent                                                   mInstanceIdent;
+    aos::NetworkParameters                                          mNetworkParameters;
+    StaticString<cHostNameLen>                                      mHostname;
+    StaticArray<StaticString<cHostNameLen>, cMaxNumAliases>         mAliases;
+    uint64_t                                                        mIngressKbit;
+    uint64_t                                                        mEgressKbit;
+    StaticArray<StaticString<cExposedPortLen>, cMaxNumExposedPorts> mExposedPorts;
+    StaticArray<Host, cMaxNumHosts>                                 mHosts;
+    StaticArray<StaticString<cIPLen>, cMaxNumDNSServers>            mDNSSevers;
+    StaticString<cFilePathLen>                                      mHostsFilePath;
+    StaticString<cFilePathLen>                                      mResolvConfFilePath;
+    uint64_t                                                        mUploadLimit;
+    uint64_t                                                        mDownloadLimit;
+
+    /**
+     * Compares network parameters.
+     *
+     * @param instanceNetworkParams instance network parameters to compare.
+     * @return bool.
+     */
+    bool operator==(const InstanceNetworkParameters& instanceNetworkParams) const
+    {
+        return mInstanceIdent == instanceNetworkParams.mInstanceIdent
+            && mNetworkParameters == instanceNetworkParams.mNetworkParameters
+            && mHostname == instanceNetworkParams.mHostname && mAliases == instanceNetworkParams.mAliases
+            && mIngressKbit == instanceNetworkParams.mIngressKbit && mEgressKbit == instanceNetworkParams.mEgressKbit
+            && mExposedPorts == instanceNetworkParams.mExposedPorts && mHosts == instanceNetworkParams.mHosts
+            && mDNSSevers == instanceNetworkParams.mDNSSevers && mHostsFilePath == instanceNetworkParams.mHostsFilePath
+            && mResolvConfFilePath == instanceNetworkParams.mResolvConfFilePath
+            && mUploadLimit == instanceNetworkParams.mUploadLimit
+            && mDownloadLimit == instanceNetworkParams.mDownloadLimit;
+    }
+
+    /**
+     * Compares instance network parameters.
+     *
+     * @param instanceNetworkParameters instance network parameters to compare.
+     * @return bool.
+     */
+    bool operator!=(const InstanceNetworkParameters& instanceNetworkParameters) const
+    {
+        return !operator==(instanceNetworkParameters);
+    }
+};
+
+/**
  * Network manager interface.
  */
 class NetworkManagerItf {
@@ -180,10 +220,9 @@ public:
      * Returns instance's network namespace path.
      *
      * @param instanceID instance id.
-     * @param[out] netnsPath instance's network namespace path.
-     * @return Error.
+     * @return RetWithError<StaticString<cFilePathLen>>.
      */
-    virtual Error GetNetnsPath(const String& instanceID, String& netnsPath) const = 0;
+    virtual RetWithError<StaticString<cFilePathLen>> GetNetnsPath(const String& instanceID) const = 0;
 
     /**
      * Updates networks.
@@ -198,10 +237,11 @@ public:
      *
      * @param instanceID instance id.
      * @param networkID network id.
-     * @param network network parameters.
+     * @param instanceNetworkParameters instance network parameters.
      * @return Error.
      */
-    virtual Error AddInstanceToNetwork(const String& instanceID, const String& networkID, const NetworkParams& network)
+    virtual Error AddInstanceToNetwork(
+        const String& instanceID, const String& networkID, const InstanceNetworkParameters& instanceNetworkParameters)
         = 0;
 
     /**
@@ -235,18 +275,345 @@ public:
         = 0;
 
     /**
+     * Gets system traffic.
+     *
+     * @param[out] inputTraffic system input traffic.
+     * @param[out] outputTraffic system output traffic.
+     * @return Error.
+     */
+    virtual Error GetSystemTraffic(uint64_t& inputTraffic, uint64_t& outputTraffic) const = 0;
+
+    /**
      * Sets the traffic period.
      *
      * @param period traffic period.
      * @return Error
      */
-    virtual Error SetTrafficPeriod(uint32_t period) = 0;
+    virtual Error SetTrafficPeriod(TrafficPeriod period) = 0;
+};
+
+/**
+ * Traffic monitor interface.
+ */
+class TrafficMonitorItf {
+public:
+    /**
+     * Destructor.
+     */
+    virtual ~TrafficMonitorItf() = default;
+
+    /**
+     * Starts traffic monitoring.
+     *
+     * @return Error.
+     */
+    virtual Error Start() = 0;
+
+    /**
+     * Stops traffic monitoring.
+     *
+     * @return Error.
+     */
+    virtual Error Stop() = 0;
+
+    /**
+     * Sets monitoring period.
+     *
+     * @param period monitoring period in seconds.
+     */
+    virtual void SetPeriod(TrafficPeriod period) = 0;
+
+    /**
+     * Starts monitoring instance.
+     *
+     * @param instanceID instance ID.
+     * @param IPAddress instance IP address.
+     * @param downloadLimit download limit.
+     * @param uploadLimit upload limit.
+     * @return Error.
+     */
+    virtual Error StartInstanceMonitoring(
+        const String& instanceID, const String& IPAddress, uint64_t downloadLimit, uint64_t uploadLimit)
+        = 0;
+
+    /**
+     * Stops monitoring instance.
+     *
+     * @param instanceID instance ID.
+     * @return Error.
+     */
+    virtual Error StopInstanceMonitoring(const String& instanceID) = 0;
+
+    /**
+     * Returns system traffic data.
+     *
+     * @param inputTraffic input traffic.
+     * @param outputTraffic output traffic.
+     * @return Error.
+     */
+    virtual Error GetSystemData(uint64_t& inputTraffic, uint64_t& outputTraffic) const = 0;
+
+    /**
+     * Returns instance traffic data.
+     *
+     * @param instanceID instance ID.
+     * @param inputTraffic input traffic.
+     * @param outputTraffic output traffic.
+     * @return Error.
+     */
+    virtual Error GetInstanceTraffic(const String& instanceID, uint64_t& inputTraffic, uint64_t& outputTraffic) const
+        = 0;
+};
+
+/**
+ * Namespace manager interface.
+ */
+class NamespaceManagerItf {
+public:
+    /**
+     * Destructor.
+     */
+    virtual ~NamespaceManagerItf() = default;
+
+    /**
+     * Creates network namespace.
+     * @param ns network namespace name.
+     * @return Error.
+     */
+    virtual Error CreateNetworkNamespace(const String& ns) = 0;
+
+    /**
+     * Returns network namespace path.
+     *
+     * @param ns network namespace name.
+     * @return RetWithError<StaticString<cFilePathLen>>.
+     */
+    virtual RetWithError<StaticString<cFilePathLen>> GetNetworkNamespacePath(const String& ns) const = 0;
+
+    /**
+     * Deletes network namespace.
+     *
+     * @param ns network namespace name.
+     * @return Error.
+     */
+    virtual Error DeleteNetworkNamespace(const String& ns) = 0;
+};
+
+/**
+ * Network interface manager interface.
+ */
+class NetworkInterfaceManagerItf {
+public:
+    /**
+     * Destructor.
+     */
+    virtual ~NetworkInterfaceManagerItf() = default;
+
+    /**
+     * Removes interface.
+     *
+     * @param ifname interface name.
+     * @return Error.
+     */
+    virtual Error RemoveInterface(const String& ifname) = 0;
+
+    /**
+     * Brings up interface.
+     *
+     * @param ifname interface name.
+     * @return Error.
+     */
+    virtual Error BringUpInterface(const String& ifname) = 0;
+};
+
+/**
+ * Network manager.
+ */
+class NetworkManager : public NetworkManagerItf {
+public:
+    /**
+     * Creates network manager instance.
+     */
+    NetworkManager() = default;
+
+    /**
+     * Destructor.
+     */
+    ~NetworkManager();
+
+    /**
+     * Initializes network manager.
+     *
+     * @param storage storage interface.
+     * @param cni CNI interface.
+     * @param netMonitor traffic monitor.
+     * @param netns namespace manager.
+     * @param netIf network interface manager.
+     * @param workingDir working directory.
+     * @return Error.
+     */
+    Error Init(StorageItf& storage, cni::CNIItf& cni, TrafficMonitorItf& netMonitor, NamespaceManagerItf& netns,
+        NetworkInterfaceManagerItf& netIf, const String& workingDir);
+
+    /**
+     * Starts network manager.
+     *
+     * @return Error.
+     */
+    Error Start();
+
+    /**
+     * Stops network manager.
+     *
+     * @return Error.
+     */
+    Error Stop();
+
+    /**
+     * Returns instance's network namespace path.
+     *
+     * @param instanceID instance ID.
+     * @return RetWithError<StaticString<cFilePathLen>>.
+     */
+    RetWithError<StaticString<cFilePathLen>> GetNetnsPath(const String& instanceID) const override;
+
+    /**
+     * Updates networks.
+     *
+     * @param networks network parameters.
+     * @return Error.
+     */
+    Error UpdateNetworks(const Array<aos::NetworkParameters>& networks) override;
+
+    /**
+     * Adds instance to network.
+     *
+     * @param instanceID instance ID.
+     * @param networkID network ID.
+     * @param instanceNetworkParameters instance network parameters.
+     * @return Error.
+     */
+    Error AddInstanceToNetwork(const String& instanceID, const String& networkID,
+        const InstanceNetworkParameters& instanceNetworkParameters) override;
+
+    /**
+     * Removes instance from network.
+     *
+     * @param instanceID instance ID.
+     * @param networkID network ID.
+     * @return Error.
+     */
+    Error RemoveInstanceFromNetwork(const String& instanceID, const String& networkID) override;
+
+    /**
+     * Returns instance's IP address.
+     *
+     * @param instanceID instance ID.
+     * @param networkID network ID.
+     * @param[out] ip instance's IP address.
+     * @return Error.
+     */
+    Error GetInstanceIP(const String& instanceID, const String& networkID, String& ip) const override;
+
+    /**
+     * Returns instance's traffic.
+     *
+     * @param instanceID instance ID.
+     * @param[out] inputTraffic instance's input traffic.
+     * @param[out] outputTraffic instance's output traffic.
+     * @return Error.
+     */
+    Error GetInstanceTraffic(const String& instanceID, uint64_t& inputTraffic, uint64_t& outputTraffic) const override;
+
+    /**
+     * Gets system traffic.
+     *
+     * @param[out] inputTraffic system input traffic.
+     * @param[out] outputTraffic system output traffic.
+     * @return Error.
+     */
+    Error GetSystemTraffic(uint64_t& inputTraffic, uint64_t& outputTraffic) const override;
+
+    /**
+     * Sets the traffic period.
+     *
+     * @param period traffic period.
+     * @return Error
+     */
+    Error SetTrafficPeriod(TrafficPeriod period) override;
+
+private:
+    struct NetworkData {
+        StaticString<cIPLen>                                  IPAddr;
+        StaticArray<StaticString<cHostNameLen>, cMaxNumHosts> mHost;
+    };
+
+    using InstanceCache = StaticMap<StaticString<cInstanceIDLen>, NetworkData, cMaxNumInstances>;
+    using NetworkCache  = StaticMap<StaticString<cProviderIDLen>, InstanceCache, cMaxNumServiceProviders>;
+
+    static constexpr uint64_t cBurstLen              = 12800;
+    static constexpr auto     cMaxExposedPort        = 2;
+    static constexpr auto     cAdminChainPrefix      = "INSTANCE_";
+    static constexpr auto     cInstanceInterfaceName = "eth0";
+    static constexpr auto     cBridgePrefix          = "br-";
+    static constexpr auto     cNumAllocations        = 8 * AOS_CONFIG_LAUNCHER_NUM_COOPERATE_LAUNCHES;
+
+    Error IsInstanceInNetwork(const String& instanceID, const String& networkID) const;
+    Error AddInstanceToCache(const String& instanceID, const String& networkID);
+    Error PrepareCNIConfig(const String& instanceID, const String& networkID, const InstanceNetworkParameters& network,
+        cni::NetworkConfigList& net, cni::RuntimeConf& rt, Array<StaticString<cHostNameLen>>& hosts) const;
+    Error PrepareNetworkConfigList(const String& instanceID, const String& networkID,
+        const InstanceNetworkParameters& network, cni::NetworkConfigList& net) const;
+    Error PrepareRuntimeConfig(
+        const String& instanceID, cni::RuntimeConf& rt, const Array<StaticString<cHostNameLen>>& hosts) const;
+
+    Error CreateBridgePluginConfig(
+        const String& networkID, const InstanceNetworkParameters& network, cni::BridgePluginConf& config) const;
+    Error CreateFirewallPluginConfig(
+        const String& instanceID, const InstanceNetworkParameters& network, cni::FirewallPluginConf& config) const;
+    Error CreateBandwidthPluginConfig(const InstanceNetworkParameters& network, cni::BandwidthNetConf& config) const;
+    Error CreateDNSPluginConfig(
+        const String& networkID, const InstanceNetworkParameters& network, cni::DNSPluginConf& config) const;
+    Error UpdateInstanceNetworkCache(const String& instanceID, const String& networkID, const String& instanceIP,
+        const Array<StaticString<cHostNameLen>>& hosts);
+    Error RemoveInstanceFromCache(const String& instanceID, const String& networkID);
+    Error ClearNetwork(const String& networkID);
+    Error PrepareHosts(const String& instanceID, const String& networkID, const InstanceNetworkParameters& network,
+        Array<StaticString<cHostNameLen>>& hosts) const;
+    Error IsHostnameExist(const InstanceCache& instanceCache, const Array<StaticString<cHostNameLen>>& hosts) const;
+    Error PushHostWithDomain(
+        const String& host, const String& networkID, Array<StaticString<cHostNameLen>>& hosts) const;
+    Error CreateHostsFile(
+        const String& networkID, const String& instanceIP, const InstanceNetworkParameters& network) const;
+    Error WriteHost(const Host& host, int fd) const;
+    Error WriteHosts(Array<SharedPtr<Host>> hosts, int fd) const;
+    Error WriteHosts(Array<Host> hosts, int fd) const;
+    Error WriteHostsFile(
+        const String& filePath, const Array<SharedPtr<Host>>& hosts, const InstanceNetworkParameters& network) const;
+
+    Error CreateResolvConfFile(const String& networkID, const InstanceNetworkParameters& network,
+        const Array<StaticString<cIPLen>>& dns) const;
+    Error WriteResolvConfFile(const String& filePath, const Array<StaticString<cIPLen>>& mainServers,
+        const InstanceNetworkParameters& network) const;
+
+    StorageItf*                 mStorage {};
+    cni::CNIItf*                mCNI {};
+    TrafficMonitorItf*          mNetMonitor {};
+    NamespaceManagerItf*        mNetns {};
+    NetworkInterfaceManagerItf* mNetIf {};
+    StaticString<cFilePathLen>  mCNINetworkCacheDir;
+    NetworkCache                mNetworkData;
+    mutable Mutex               mMutex;
+    StaticAllocator<(sizeof(cni::NetworkConfigList) + sizeof(cni::RuntimeConf) + sizeof(cni::Result))
+            * AOS_CONFIG_LAUNCHER_NUM_COOPERATE_LAUNCHES,
+        cNumAllocations>
+        mAllocator;
+    mutable StaticAllocator<(sizeof(Host) * 3) * AOS_CONFIG_LAUNCHER_NUM_COOPERATE_LAUNCHES, cNumAllocations>
+        mHostAllocator;
 };
 
 /** @}*/
 
-} // namespace networkmanager
-} // namespace sm
-} // namespace aos
+} // namespace aos::sm::networkmanager
 
 #endif
