@@ -95,6 +95,7 @@ add_library(
     monitoring/resourcemonitor.cpp
     pkcs11/pkcs11.cpp
     pkcs11/privatekey.cpp
+    tools/fs.cpp
     tools/semver.cpp
     tools/time.cpp
     tools/uuid.cpp

@@ -64,7 +64,7 @@ Error Launcher::Init(const Config& config, iam::nodeinfoprovider::NodeInfoProvid
         }
     }
 
-    mHostWhiteoutsDir = FS::JoinPath(mConfig.mWorkDir, cHostFSWhiteoutsDir);
+    mHostWhiteoutsDir = fs::JoinPath(mConfig.mWorkDir, cHostFSWhiteoutsDir);
 
     if (err = mRuntime->CreateHostFSWhiteouts(mHostWhiteoutsDir, mConfig.mHostBinds); !err.IsNone()) {
         return AOS_ERROR_WRAP(err);

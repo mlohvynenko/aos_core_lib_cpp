@@ -192,7 +192,7 @@ RetWithError<SharedPtr<crypto::x509::CertificateChain>> CertLoader::LoadCertsFro
 
     auto buff = MakeUnique<PEMCertChainBlob>(&mAllocator);
 
-    auto err = FS::ReadFileToString(fileName, *buff);
+    auto err = fs::ReadFileToString(fileName, *buff);
     if (!err.IsNone()) {
         return {nullptr, err};
     }
@@ -210,7 +210,7 @@ RetWithError<SharedPtr<crypto::PrivateKeyItf>> CertLoader::LoadPrivKeyFromFile(c
 
     auto buff = MakeUnique<StaticString<crypto::cPrivKeyPEMLen>>(&mAllocator);
 
-    auto err = FS::ReadFileToString(fileName, *buff);
+    auto err = fs::ReadFileToString(fileName, *buff);
     if (!err.IsNone()) {
         return {nullptr, err};
     }
@@ -274,7 +274,7 @@ Error ParsePIN(const String& url, String& pin)
         return ErrorEnum::eNone;
     }
 
-    pinSourceErr = FS::ReadFileToString(pinPath, pin);
+    pinSourceErr = fs::ReadFileToString(pinPath, pin);
     if (!pinSourceErr.IsNone()) {
         return AOS_ERROR_WRAP(pinSourceErr);
     }
