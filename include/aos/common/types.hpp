@@ -16,6 +16,7 @@
 #include "aos/common/tools/fs.hpp"
 #include "aos/common/tools/log.hpp"
 #include "aos/common/tools/optional.hpp"
+#include "aos/common/tools/time.hpp"
 
 namespace aos {
 
