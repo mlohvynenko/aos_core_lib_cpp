@@ -20,11 +20,11 @@ StaticString<cTimeStrLen> Duration::ToISO8601String() const
 
     StaticString<cTimeStrLen> result = (mDuration < 0) ? "-P" : "P";
 
-    auto total = abs(mDuration);
+    auto total = llabs(mDuration);
     char buffer[16];
 
     if (auto years = total / Time::cYear.Nanoseconds(); years > 0) {
-        snprintf(buffer, sizeof(buffer), "%ldY", years);
+        snprintf(buffer, sizeof(buffer), "%lldY", years);
 
         result.Append(buffer);
 
@@ -32,14 +32,14 @@ StaticString<cTimeStrLen> Duration::ToISO8601String() const
     }
 
     if (auto months = total / Time::cMonth.Nanoseconds(); months > 0) {
-        snprintf(buffer, sizeof(buffer), "%ldM", months);
+        snprintf(buffer, sizeof(buffer), "%lldM", months);
 
         result.Append(buffer);
         total %= Time::cMonth.Nanoseconds();
     }
 
     if (auto weeks = total / Time::cWeek.Nanoseconds(); weeks > 0) {
-        snprintf(buffer, sizeof(buffer), "%ldW", weeks);
+        snprintf(buffer, sizeof(buffer), "%lldW", weeks);
 
         result.Append(buffer);
 
@@ -47,7 +47,7 @@ StaticString<cTimeStrLen> Duration::ToISO8601String() const
     }
 
     if (auto days = total / Time::cDay.Nanoseconds(); days > 0) {
-        snprintf(buffer, sizeof(buffer), "%ldD", days);
+        snprintf(buffer, sizeof(buffer), "%lldD", days);
 
         result.Append(buffer);
 
@@ -67,17 +67,17 @@ StaticString<cTimeStrLen> Duration::ToISO8601String() const
         result.Append("T");
 
         if (hours) {
-            snprintf(buffer, sizeof(buffer), "%ldH", hours);
+            snprintf(buffer, sizeof(buffer), "%lldH", hours);
             result.Append(buffer);
         }
 
         if (minutes) {
-            snprintf(buffer, sizeof(buffer), "%ldM", minutes);
+            snprintf(buffer, sizeof(buffer), "%lldM", minutes);
             result.Append(buffer);
         }
 
         if (total == 0 && seconds > 0) {
-            snprintf(buffer, sizeof(buffer), "%ldS", seconds);
+            snprintf(buffer, sizeof(buffer), "%lldS", seconds);
             result.Append(buffer);
         }
 
