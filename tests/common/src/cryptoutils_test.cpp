@@ -26,7 +26,7 @@ protected:
     {
         test::InitLog();
 
-        ASSERT_TRUE(FS::WriteStringToFile(mPINSource, mPIN, 0664).IsNone());
+        ASSERT_TRUE(fs::WriteStringToFile(mPINSource, mPIN, 0664).IsNone());
 
         ASSERT_TRUE(mCryptoProvider.Init().IsNone());
         ASSERT_TRUE(mSoftHSMEnv.Init(mPIN, mLabel).IsNone());
@@ -37,7 +37,7 @@ protected:
         mSlotID  = mSoftHSMEnv.GetSlotID();
     }
 
-    void TearDown() override { ASSERT_TRUE(FS::Remove(mPINSource).IsNone()); }
+    void TearDown() override { ASSERT_TRUE(fs::Remove(mPINSource).IsNone()); }
 
     void ImportCertificateChainToPKCS11(const Array<uint8_t>& caID, const Array<uint8_t>& clientID)
     {
@@ -51,10 +51,10 @@ protected:
         StaticArray<uint8_t, crypto::cCertDERSize> derBlob;
         crypto::x509::Certificate                  caCert, clientCert;
 
-        ASSERT_TRUE(FS::ReadFile(CERTIFICATES_DIR "/ca.cer.der", derBlob).IsNone());
+        ASSERT_TRUE(fs::ReadFile(CERTIFICATES_DIR "/ca.cer.der", derBlob).IsNone());
         ASSERT_TRUE(mCryptoProvider.DERToX509Cert(derBlob, caCert).IsNone());
 
-        ASSERT_TRUE(FS::ReadFile(CERTIFICATES_DIR "/client.cer.der", derBlob).IsNone());
+        ASSERT_TRUE(fs::ReadFile(CERTIFICATES_DIR "/client.cer.der", derBlob).IsNone());
         ASSERT_TRUE(mCryptoProvider.DERToX509Cert(derBlob, clientCert).IsNone());
 
         // import certificates

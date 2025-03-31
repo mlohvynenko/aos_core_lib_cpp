@@ -404,7 +404,7 @@ TEST_F(PKCS11Test, ImportCertificate)
     StaticArray<uint8_t, crypto::cCertDERSize> derBlob;
     crypto::x509::Certificate                  caCert;
 
-    ASSERT_TRUE(FS::ReadFile(CERTIFICATES_DIR "/ca.cer.der", derBlob).IsNone());
+    ASSERT_TRUE(fs::ReadFile(CERTIFICATES_DIR "/ca.cer.der", derBlob).IsNone());
     ASSERT_TRUE(mCryptoProvider.DERToX509Cert(derBlob, caCert).IsNone());
 
     ASSERT_TRUE(Utils(session, mCryptoProvider, mAllocator).ImportCertificate(id, mLabel, caCert).IsNone());
@@ -474,10 +474,10 @@ TEST_F(PKCS11Test, FindCertificateChain)
     StaticArray<uint8_t, crypto::cCertDERSize> derBlob;
     crypto::x509::Certificate                  caCert, clientCert;
 
-    ASSERT_TRUE(FS::ReadFile(CERTIFICATES_DIR "/ca.cer.der", derBlob).IsNone());
+    ASSERT_TRUE(fs::ReadFile(CERTIFICATES_DIR "/ca.cer.der", derBlob).IsNone());
     ASSERT_TRUE(mCryptoProvider.DERToX509Cert(derBlob, caCert).IsNone());
 
-    ASSERT_TRUE(FS::ReadFile(CERTIFICATES_DIR "/client.cer.der", derBlob).IsNone());
+    ASSERT_TRUE(fs::ReadFile(CERTIFICATES_DIR "/client.cer.der", derBlob).IsNone());
     ASSERT_TRUE(mCryptoProvider.DERToX509Cert(derBlob, clientCert).IsNone());
 
     // import certificates

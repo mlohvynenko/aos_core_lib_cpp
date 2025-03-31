@@ -4,8 +4,11 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-#include "aos/sm/networkmanager.hpp"
+#include <fcntl.h>
+#include <unistd.h>
+
 #include "aos/common/tools/memory.hpp"
+#include "aos/sm/networkmanager.hpp"
 
 #include "log.hpp"
 
@@ -26,9 +29,9 @@ Error NetworkManager::Init(StorageItf& storage, cni::CNIItf& cni, TrafficMonitor
     mNetns      = &netns;
     mNetIf      = &netIf;
 
-    auto cniDir = FS::JoinPath(workingDir, "cni");
+    auto cniDir = fs::JoinPath(workingDir, "cni");
 
-    if (auto err = FS::RemoveAll(cniDir); !err.IsNone()) {
+    if (auto err = fs::RemoveAll(cniDir); !err.IsNone()) {
         LOG_ERR() << "Failed to remove cni directory: " << cniDir;
     }
 
@@ -36,7 +39,7 @@ Error NetworkManager::Init(StorageItf& storage, cni::CNIItf& cni, TrafficMonitor
         return AOS_ERROR_WRAP(err);
     }
 
-    mCNINetworkCacheDir = FS::JoinPath(cniDir, "networks");
+    mCNINetworkCacheDir = fs::JoinPath(cniDir, "networks");
 
     return ErrorEnum::eNone;
 }
@@ -361,7 +364,7 @@ Error NetworkManager::ClearNetwork(const String& networkID)
         return err;
     }
 
-    if (auto err = FS::RemoveAll(FS::JoinPath(mCNINetworkCacheDir, networkID)); !err.IsNone()) {
+    if (auto err = fs::RemoveAll(fs::JoinPath(mCNINetworkCacheDir, networkID)); !err.IsNone()) {
         return AOS_ERROR_WRAP(err);
     }
 

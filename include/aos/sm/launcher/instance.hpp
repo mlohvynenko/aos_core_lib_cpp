@@ -258,7 +258,7 @@ public:
      */
     static RetWithError<bool> IsInstanceStarted(const String& instanceID)
     {
-        return FS::DirExist(FS::JoinPath(cRuntimeDir, instanceID));
+        return fs::DirExist(fs::JoinPath(cRuntimeDir, instanceID));
     };
 
     /**
@@ -355,12 +355,12 @@ private:
 
     StaticString<cFilePathLen> GetFullStatePath(const String& path) const
     {
-        return FS::JoinPath(mConfig.mStateDir, path);
+        return fs::JoinPath(mConfig.mStateDir, path);
     }
 
     StaticString<cFilePathLen> GetFullStoragePath(const String& path) const
     {
-        return FS::JoinPath(mConfig.mStorageDir, path);
+        return fs::JoinPath(mConfig.mStorageDir, path);
     }
 
     static Mutex                                            sMutex;

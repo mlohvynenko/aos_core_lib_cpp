@@ -172,7 +172,7 @@ RetWithError<StaticString<pkcs11::cPINLen>> ReadPIN(const String& file)
 {
     StaticString<pkcs11::cPINLen> pin;
 
-    auto err = FS::ReadFileToString(file, pin);
+    auto err = fs::ReadFileToString(file, pin);
 
     return {pin, err};
 }
@@ -185,10 +185,10 @@ void ApplyCertificate(
 
     // create certificate from CSR, CA priv key, CA cert
     StaticString<crypto::cPrivKeyPEMLen> caKey;
-    ASSERT_TRUE(FS::ReadFileToString(CERTIFICATES_DIR "/ca.key", caKey).IsNone());
+    ASSERT_TRUE(fs::ReadFileToString(CERTIFICATES_DIR "/ca.key", caKey).IsNone());
 
     StaticString<crypto::cCertPEMLen> caCert;
-    ASSERT_TRUE(FS::ReadFileToString(CERTIFICATES_DIR "/ca.pem", caCert).IsNone());
+    ASSERT_TRUE(fs::ReadFileToString(CERTIFICATES_DIR "/ca.pem", caCert).IsNone());
 
     uint64_t serialNum = 0x333333;
     auto     serial    = Array<uint8_t>(reinterpret_cast<uint8_t*>(&serialNum), sizeof(serialNum));
@@ -202,7 +202,7 @@ void ApplyCertificate(
     // apply client certificate
     CertInfo certInfo;
 
-    // FS::WriteStringToFile(CERTIFICATES_DIR "/client-out.pem", clientCertChain, 0666);
+    // fs::WriteStringToFile(CERTIFICATES_DIR "/client-out.pem", clientCertChain, 0666);
     ASSERT_TRUE(handler.ApplyCertificate(certType, clientCertChain, certInfo).IsNone());
     EXPECT_EQ(certInfo.mSerial, serial);
 }
@@ -288,10 +288,10 @@ TEST_F(IAMTest, ApplyCertificate)
 
     // create certificate from CSR, CA priv key, CA cert
     StaticString<crypto::cPrivKeyPEMLen> caKey;
-    ASSERT_TRUE(FS::ReadFileToString(CERTIFICATES_DIR "/ca.key", caKey).IsNone());
+    ASSERT_TRUE(fs::ReadFileToString(CERTIFICATES_DIR "/ca.key", caKey).IsNone());
 
     StaticString<crypto::cCertPEMLen> caCert;
-    ASSERT_TRUE(FS::ReadFileToString(CERTIFICATES_DIR "/ca.pem", caCert).IsNone());
+    ASSERT_TRUE(fs::ReadFileToString(CERTIFICATES_DIR "/ca.pem", caCert).IsNone());
 
     uint64_t serialNum = 0x333333;
     auto     serial    = Array<uint8_t>(reinterpret_cast<uint8_t*>(&serialNum), sizeof(serialNum));
@@ -305,7 +305,7 @@ TEST_F(IAMTest, ApplyCertificate)
     // apply client certificate
     CertInfo certInfo;
 
-    // FS::WriteStringToFile(CERTIFICATES_DIR "/client-out.pem", clientCertChain, 0666);
+    // fs::WriteStringToFile(CERTIFICATES_DIR "/client-out.pem", clientCertChain, 0666);
     ASSERT_TRUE(mCertHandler->ApplyCertificate("iam", clientCertChain, certInfo).IsNone());
     EXPECT_EQ(certInfo.mSerial, serial);
 
@@ -534,7 +534,7 @@ TEST_F(IAMTest, RemoveInvalidPKCS11Objects)
     Tie(certId, err) = uuid::StringToUUID("08080808-0404-0404-0404-121212121212");
     ASSERT_TRUE(err.IsNone());
 
-    ASSERT_TRUE(FS::ReadFileToString(CERTIFICATES_DIR "/ca.pem", pemCert).IsNone());
+    ASSERT_TRUE(fs::ReadFileToString(CERTIFICATES_DIR "/ca.pem", pemCert).IsNone());
 
     ASSERT_TRUE(mCryptoProvider.PEMToX509Certs(pemCert, caCert).IsNone());
 

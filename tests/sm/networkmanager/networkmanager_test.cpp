@@ -109,7 +109,7 @@ TEST_F(NetworkManagerTest, AddInstanceToNetwork_VerifyHostsFile)
         params.mNetworkParameters.mIP = aos::String(ip.c_str());
         params.mHostname              = aos::String(hostname.c_str());
         std::string hostsFilePath     = "hosts_" + std::to_string(i);
-        params.mHostsFilePath         = aos::FS::JoinPath(mWorkingDir, hostsFilePath.c_str());
+        params.mHostsFilePath         = aos::fs::JoinPath(mWorkingDir, hostsFilePath.c_str());
         paramsVec.push_back(params);
     }
 
@@ -281,7 +281,7 @@ TEST_F(NetworkManagerTest, AddInstanceToNetwork_VerifyResolvConfFile)
     const aos::String networkID  = "test-network";
     auto              params     = CreateTestInstanceNetworkParameters();
 
-    params.mResolvConfFilePath = aos::FS::JoinPath(mWorkingDir, "resolv.conf");
+    params.mResolvConfFilePath = aos::fs::JoinPath(mWorkingDir, "resolv.conf");
 
     Result cniResult;
     cniResult.mDNSServers.PushBack("1.1.1.1");
@@ -331,8 +331,8 @@ TEST_F(NetworkManagerTest, AddInstanceToNetwork_NoConfigFiles)
 
     ASSERT_EQ(mNetManager->AddInstanceToNetwork(instanceID, networkID, params), aos::ErrorEnum::eNone);
 
-    EXPECT_FALSE(std::filesystem::exists(aos::FS::JoinPath(mWorkingDir, "hosts").CStr()));
-    EXPECT_FALSE(std::filesystem::exists(aos::FS::JoinPath(mWorkingDir, "resolv.conf").CStr()));
+    EXPECT_FALSE(std::filesystem::exists(aos::fs::JoinPath(mWorkingDir, "hosts").CStr()));
+    EXPECT_FALSE(std::filesystem::exists(aos::fs::JoinPath(mWorkingDir, "resolv.conf").CStr()));
 }
 
 TEST_F(NetworkManagerTest, AddInstanceToNetwork_FileCreationError)
