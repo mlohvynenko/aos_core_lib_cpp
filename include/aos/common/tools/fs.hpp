@@ -192,6 +192,15 @@ Error Remove(const String& path);
 Error RemoveAll(const String& path);
 
 /**
+ * Renames file or directory.
+ *
+ * @param oldPath old path.
+ * @param newPath new path.
+ * @return Error.
+ */
+Error Rename(const String& oldPath, const String& newPath);
+
+/**
  * Reads content of the file named by fileName into the buffer.
  *
  * @param fileName file name.

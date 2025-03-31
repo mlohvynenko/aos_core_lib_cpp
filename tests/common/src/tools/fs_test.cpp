@@ -225,6 +225,33 @@ TEST_F(FSTest, RemoveAllNotExistingDir)
     EXPECT_TRUE(fs::RemoveAll(testDir.c_str()).IsNone());
 }
 
+TEST_F(FSTest, RenameNotExisting)
+{
+    const auto testFile = cBaseTestDir / "rename-not-existing-test.txt";
+    const auto newFile  = cBaseTestDir / "rename-not-existing-new-test.txt";
+
+    EXPECT_EQ(fs::DirExist(testFile.c_str()), RetWithError<bool>(false));
+    EXPECT_FALSE(fs::Rename(testFile.c_str(), newFile.c_str()).IsNone());
+}
+
+TEST_F(FSTest, RenameFolder)
+{
+    const auto testDir  = cBaseTestDir / "rename-folder-test";
+    const auto childDir = testDir / "child";
+    const auto newDir   = cBaseTestDir / "rename-folder-new-test";
+
+    EXPECT_TRUE(std::filesystem::create_directories(childDir));
+    CreateFile((childDir / "test.txt").c_str());
+
+    EXPECT_EQ(fs::DirExist(testDir.c_str()), RetWithError<bool>(true));
+    EXPECT_EQ(fs::DirExist(newDir.c_str()), RetWithError<bool>(false));
+
+    EXPECT_TRUE(fs::Rename(testDir.c_str(), newDir.c_str()).IsNone());
+
+    EXPECT_EQ(fs::DirExist(testDir.c_str()), RetWithError<bool>(false));
+    EXPECT_TRUE(std::filesystem::exists(newDir / "child/test.txt"));
+}
+
 TEST_F(FSTest, ReadFile)
 {
     const auto testFile      = cBaseTestDir / "read-file-test.txt";

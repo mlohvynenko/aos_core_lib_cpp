@@ -319,6 +319,15 @@ Error RemoveAll(const String& path)
     return ErrorEnum::eNone;
 }
 
+Error Rename(const String& oldPath, const String& newPath)
+{
+    if (auto ret = rename(oldPath.CStr(), newPath.CStr()); ret != 0) {
+        return errno;
+    }
+
+    return ErrorEnum::eNone;
+}
+
 Error ReadFile(const String& fileName, Array<uint8_t>& buff)
 {
     auto fd = open(fileName.CStr(), O_RDONLY);
