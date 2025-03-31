@@ -9,6 +9,7 @@
 
 #include "aos/common/tools/fs.hpp"
 #include "aos/common/tools/map.hpp"
+#include "aos/common/tools/memory.hpp"
 #include "aos/common/tools/thread.hpp"
 #include "aos/common/types.hpp"
 #include "aos/sm/cni.hpp"
