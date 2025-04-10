@@ -1371,9 +1371,9 @@ struct NodeInfo {
  * Service run parameters.
  */
 struct RunParameters {
-    Duration mStartInterval;
-    Duration mRestartInterval;
-    long     mStartBurst;
+    Optional<Duration> mStartInterval;
+    Optional<Duration> mRestartInterval;
+    Optional<long>     mStartBurst;
 
     /**
      * Compares run parameters.
