@@ -11,6 +11,8 @@
 #include <assert.h>
 #include <cstdint>
 
+#include "aos/common/tools/log.hpp"
+
 namespace aos {
 
 /**
@@ -183,6 +185,23 @@ public:
      * @return T&.
      */
     const T& operator*() const { return GetValue(); }
+
+    /**
+     * Outputs optional object to log.
+     *
+     * @param log log to output.
+     * @param obj optional object.
+     *
+     * @return Log&.
+     */
+    friend Log& operator<<(Log& log, const Optional& obj)
+    {
+        if (!obj.HasValue()) {
+            return log << "none";
+        }
+
+        return log << *obj;
+    }
 
     /**
      * Destroys optional instance.
