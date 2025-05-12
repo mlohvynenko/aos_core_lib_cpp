@@ -226,6 +226,17 @@ Error ReadFile(const String& fileName, Array<uint8_t>& buff);
 Error ReadFileToString(const String& fileName, String& text);
 
 /**
+ * Reads line from file.
+ *
+ * @param fd file descriptor.
+ * @param pos position in the file.
+ * @param line line to read.
+ * @param delimiter line delimiter.
+ * @return Error.
+ */
+Error ReadLine(int fd, size_t pos, String& line, const String& delimiter = "\n\0");
+
+/**
  * Overwrites file with a specified data.
  *
  * @param fileName file name.
