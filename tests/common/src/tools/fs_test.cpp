@@ -5,12 +5,15 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+#include <fcntl.h>
 #include <filesystem>
 #include <fstream>
+#include <stdio.h>
 
 #include <gtest/gtest.h>
 
 #include "aos/common/tools/fs.hpp"
+#include "aos/common/tools/memory.hpp"
 
 #include "aos/test/log.hpp"
 
@@ -294,6 +297,50 @@ TEST_F(FSTest, ReadFileToString)
     EXPECT_FALSE(fs::ReadFileToString(wrongFileName.c_str(), bigBuff).IsNone());
 
     fs::RemoveAll(testFile.c_str());
+}
+
+TEST_F(FSTest, ReadLine)
+{
+    const auto testFile = cBaseTestDir / "read-line-test.txt";
+
+    const char text[] = "Hello World0\nHello World1\nHello World2\n";
+
+    CreateFile(testFile.c_str(), text);
+
+    StaticString<100> bigBuff;
+    StaticString<1>   smallBuff;
+
+    size_t filePos = 0;
+
+    auto fd = open(testFile.c_str(), O_RDONLY);
+    ASSERT_GE(fd, 0);
+
+    auto closeFile = DeferRelease(&fd, [](const int* fd) { close(*fd); });
+
+    EXPECT_FALSE(fs::ReadLine(fd, std::string::npos, smallBuff).IsNone());
+
+    EXPECT_EQ(fs::ReadLine(fd, filePos, smallBuff), ErrorEnum::eNotFound);
+
+    EXPECT_EQ(fs::ReadLine(fd, 0, bigBuff, "\t"), ErrorEnum::eNotFound);
+
+    EXPECT_TRUE(fs::ReadLine(fd, filePos, bigBuff).IsNone());
+    EXPECT_EQ(bigBuff, "Hello World0");
+
+    filePos += bigBuff.Size() + 1;
+
+    EXPECT_TRUE(fs::ReadLine(fd, filePos, bigBuff).IsNone());
+    EXPECT_EQ(bigBuff, "Hello World1");
+
+    filePos += bigBuff.Size() + 1;
+
+    EXPECT_TRUE(fs::ReadLine(fd, filePos, bigBuff).IsNone());
+    EXPECT_EQ(bigBuff, "Hello World2");
+
+    filePos += bigBuff.Size() + 1;
+
+    fs::RemoveAll(testFile.c_str());
+
+    EXPECT_FALSE(fs::ReadLine(fd, 0, smallBuff).IsNone());
 }
 
 TEST_F(FSTest, WriteFile)

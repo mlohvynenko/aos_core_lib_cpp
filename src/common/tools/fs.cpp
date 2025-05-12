@@ -393,6 +393,31 @@ Error ReadFileToString(const String& fileName, String& text)
     return text.Resize(buff.Size());
 }
 
+Error ReadLine(int fd, size_t pos, String& line, const String& delimiter)
+{
+    if (lseek(fd, pos, SEEK_SET) < 0) {
+        return Error(errno);
+    }
+
+    line.Resize(line.MaxSize());
+
+    ssize_t bytes = read(fd, line.Get(), line.MaxSize());
+    if (bytes < 0) {
+        return Error(errno);
+    }
+
+    if (auto err = line.Resize(bytes); !err.IsNone()) {
+        return err;
+    }
+
+    auto [eolPos, err] = line.FindAny(0, delimiter);
+    if (!err.IsNone()) {
+        return err;
+    }
+
+    return line.Resize(eolPos);
+}
+
 Error WriteFile(const String& fileName, const Array<uint8_t>& data, uint32_t perm)
 {
     // zephyr doesn't support O_TRUNC flag. This is WA to trunc file if it exists.
