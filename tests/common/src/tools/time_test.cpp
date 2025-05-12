@@ -129,6 +129,31 @@ TEST_F(TimeTest, GetDateTime)
     EXPECT_EQ(sec, 00);
 }
 
+TEST_F(TimeTest, FromUTCString)
+{
+    constexpr auto cUTCString = "2024-01-31T12:00:00Z";
+
+    auto [time, timeErr] = Time::UTC(cUTCString);
+    ASSERT_EQ(timeErr, ErrorEnum::eNone);
+
+    int day, month, year, hour, min, sec;
+
+    EXPECT_TRUE(time.GetDate(&day, &month, &year).IsNone());
+    EXPECT_TRUE(time.GetTime(&hour, &min, &sec).IsNone());
+
+    EXPECT_EQ(day, 31);
+    EXPECT_EQ(month, 1);
+    EXPECT_EQ(year, 2024);
+    EXPECT_EQ(hour, 12);
+    EXPECT_EQ(min, 00);
+    EXPECT_EQ(sec, 00);
+
+    auto [utcString, stringErr] = time.ToUTCString();
+    ASSERT_EQ(stringErr, ErrorEnum::eNone);
+
+    EXPECT_STREQ(utcString.CStr(), "2024-01-31T12:00:00Z");
+}
+
 TEST_F(TimeTest, ToUTCString)
 {
     auto t = Time::Unix(1706702400);

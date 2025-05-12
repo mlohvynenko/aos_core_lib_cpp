@@ -342,6 +342,14 @@ public:
     }
 
     /**
+     * Returns UTC time from string representation.
+     *
+     * @param utcTimeStr UTC time string.
+     * @return RetWithError<Time>.
+     */
+    static RetWithError<Time> UTC(const String& utcTimeStr);
+
+    /**
      * Checks whether Time object is default initialized.
      *
      * @result bool.
