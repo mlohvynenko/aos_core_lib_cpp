@@ -457,6 +457,13 @@ public:
     }
 
     /**
+     * @brief Returns UTC string representation.
+     *
+     * @return StaticString<cTimeStrLen>
+     */
+    RetWithError<StaticString<cTimeStrLen>> ToUTCString() const;
+
+    /**
      * Checks whether a current time is less than a specified one.
      *
      * @param obj time object to compare with.
@@ -504,22 +511,12 @@ public:
      */
     friend Log& operator<<(Log& log, const Time& obj)
     {
-        tm                        buf;
-        StaticString<cTimeStrLen> utcTimeStr;
+        auto [utcTimeStr, err] = obj.ToUTCString();
+        if (!err.IsNone()) {
+            return log << err;
+        }
 
-        auto time = gmtime_r(&obj.mTime.tv_sec, &buf);
-        assert(time != nullptr);
-
-        utcTimeStr.Resize(utcTimeStr.MaxSize());
-
-        size_t size = strftime(utcTimeStr.Get(), utcTimeStr.Size(), "%FT%TZ", time);
-        assert(size != 0);
-
-        utcTimeStr.Resize(size - 1);
-
-        log << utcTimeStr;
-
-        return log;
+        return log << utcTimeStr;
     }
 
 private:
