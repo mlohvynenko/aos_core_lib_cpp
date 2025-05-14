@@ -1097,6 +1097,35 @@ struct AlertRules {
 };
 
 /**
+ * Resource ratios.
+ */
+struct ResourceRatios {
+    Optional<double> mCPU;
+    Optional<double> mRAM;
+    Optional<double> mStorage;
+    Optional<double> mState;
+
+    /**
+     * Compares resource ratios.
+     *
+     * @param ratios resource ratios to compare.
+     * @return bool.
+     */
+    bool operator==(const ResourceRatios& ratios) const
+    {
+        return mCPU == ratios.mCPU && mRAM == ratios.mRAM && mStorage == ratios.mStorage && mState == ratios.mState;
+    }
+
+    /**
+     * Compares resource ratios.
+     *
+     * @param ratios resource ratios to compare.
+     * @return bool.
+     */
+    bool operator!=(const ResourceRatios& ratios) const { return !operator==(ratios); }
+};
+
+/**
  * Node config.
  */
 struct NodeConfig {
@@ -1106,6 +1135,7 @@ struct NodeConfig {
     StaticArray<StaticString<cLabelNameLen>, cMaxNumNodeLabels> mLabels;
     uint32_t                                                    mPriority {0};
     Optional<AlertRules>                                        mAlertRules;
+    Optional<ResourceRatios>                                    mResourceRatios;
 
     /**
      * Compares node configs.
@@ -1117,7 +1147,7 @@ struct NodeConfig {
     {
         return mNodeType == nodeConfig.mNodeType && mDevices == nodeConfig.mDevices
             && mResources == nodeConfig.mResources && mLabels == nodeConfig.mLabels && mPriority == nodeConfig.mPriority
-            && mAlertRules == nodeConfig.mAlertRules;
+            && mAlertRules == nodeConfig.mAlertRules && mResourceRatios == nodeConfig.mResourceRatios;
     }
 
     /**
