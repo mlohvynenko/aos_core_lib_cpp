@@ -74,6 +74,7 @@ public:
     T& GetValue()
     {
         assert(HasValue());
+        // cppcheck-suppress invalidPointerCast
         return *reinterpret_cast<T*>(mBuffer);
     }
 
@@ -85,6 +86,7 @@ public:
     const T& GetValue() const
     {
         assert(HasValue());
+        // cppcheck-suppress invalidPointerCast
         return *reinterpret_cast<const T*>(mBuffer);
     }
 
@@ -97,6 +99,7 @@ public:
     void SetValue(const T& value)
     {
         if (HasValue()) {
+            // cppcheck-suppress invalidPointerCast
             *reinterpret_cast<T*>(mBuffer) = value;
         } else {
             ::new (static_cast<void*>(mBuffer)) T(value);
