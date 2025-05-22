@@ -1198,12 +1198,12 @@ using PartitionInfoStaticArray = StaticArray<PartitionInfo, cMaxNumPartitions>;
  * CPU info.
  */
 struct CPUInfo {
-    StaticString<cCPUModelNameLen>  mModelName;
-    size_t                          mNumCores;
-    size_t                          mNumThreads;
-    StaticString<cCPUArchLen>       mArch;
-    StaticString<cCPUArchFamilyLen> mArchFamily;
-    uint64_t                        mMaxDMIPS;
+    StaticString<cCPUModelNameLen>            mModelName;
+    size_t                                    mNumCores;
+    size_t                                    mNumThreads;
+    StaticString<cCPUArchLen>                 mArch;
+    Optional<StaticString<cCPUArchFamilyLen>> mArchFamily;
+    Optional<uint64_t>                        mMaxDMIPS;
 
     /**
      * Compares CPU info.
