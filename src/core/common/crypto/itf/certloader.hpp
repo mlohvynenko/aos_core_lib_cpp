@@ -33,6 +33,18 @@ public:
     virtual RetWithError<SharedPtr<crypto::PrivateKeyItf>> LoadPrivKeyByURL(const String& url) = 0;
 
     /**
+     * Loads an opaque data object by URL and label. For a pkcs11: URL, the token identified by the URL
+     * is searched for a CKO_DATA object with the given label; the URL's own label/id (identifying a
+     * cert/key) are ignored.
+     *
+     * @param url input url (identifies the token/store to read from).
+     * @param dataLabel label of the data object to read.
+     * @param[out] data result data bytes.
+     * @return Error.
+     */
+    virtual Error LoadDataByURL(const String& url, const String& dataLabel, Array<uint8_t>& data) = 0;
+
+    /**
      * Destroys cert loader instance.
      */
     virtual ~CertLoaderItf() = default;

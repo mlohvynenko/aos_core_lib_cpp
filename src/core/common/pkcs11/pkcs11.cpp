@@ -1413,6 +1413,47 @@ Error Utils::DeleteCertificate(const Array<uint8_t>& id, const String& label)
     return ErrorEnum::eNone;
 }
 
+Error Utils::FindData(const String& label, Array<uint8_t>& value) const
+{
+    CK_OBJECT_CLASS dataClass = CKO_DATA;
+
+    StaticArray<ObjectAttribute, cObjectAttributesCount> dataTempl;
+
+    if (auto err = dataTempl.PushBack({CKA_CLASS, ConvertToAttributeValue(dataClass)}); !err.IsNone()) {
+        return AOS_ERROR_WRAP(err);
+    }
+
+    if (auto err = dataTempl.PushBack({CKA_LABEL, ConvertToAttributeValue(label)}); !err.IsNone()) {
+        return AOS_ERROR_WRAP(err);
+    }
+
+    StaticArray<ObjectHandle, cKeysPerToken> handles;
+
+    if (auto err = mSession->FindObjects(dataTempl, handles); !err.IsNone()) {
+        return AOS_ERROR_WRAP(err);
+    }
+
+    if (handles.IsEmpty()) {
+        return AOS_ERROR_WRAP(ErrorEnum::eNotFound);
+    }
+
+    StaticArray<AttributeType, 1> types;
+    if (auto err = types.PushBack(CKA_VALUE); !err.IsNone()) {
+        return AOS_ERROR_WRAP(err);
+    }
+
+    StaticArray<Array<uint8_t>, 1> values;
+    if (auto err = values.PushBack(value); !err.IsNone()) {
+        return AOS_ERROR_WRAP(err);
+    }
+
+    if (auto err = mSession->GetAttributeValues(handles[0], types, values); !err.IsNone()) {
+        return AOS_ERROR_WRAP(err);
+    }
+
+    return value.Assign(values[0]);
+}
+
 Error Utils::ConvertPKCS11String(const Array<uint8_t>& src, String& dst)
 {
     return ConvertFromPKCS11String(src, dst);

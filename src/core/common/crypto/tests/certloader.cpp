@@ -8,6 +8,7 @@
 #include <gtest/gtest.h>
 
 #include <core/common/crypto/certloader.hpp>
+#include <core/common/pkcs11/pkcs11.hpp>
 #include <core/common/tests/crypto/providers/cryptofactory.hpp>
 #include <core/common/tests/crypto/softhsmenv.hpp>
 #include <core/common/tests/utils/log.hpp>
@@ -68,6 +69,41 @@ protected:
         ASSERT_TRUE(pkcs11::Utils(mAllocator, session, *mCryptoProvider)
                         .ImportCertificate(clientID, mLabel, clientCert)
                         .IsNone());
+    }
+
+    void WriteDataObject(const String& label, const Array<uint8_t>& value)
+    {
+        Error                             err = ErrorEnum::eNone;
+        SharedPtr<pkcs11::SessionContext> session;
+
+        Tie(session, err) = mSoftHSMEnv.OpenUserSession(mPIN, true);
+        ASSERT_TRUE(err.IsNone());
+
+        CK_OBJECT_CLASS dataClass = CKO_DATA;
+        CK_BBOOL        trueVal   = CK_TRUE;
+
+        StaticArray<pkcs11::ObjectAttribute, 5> templ;
+
+        ASSERT_TRUE(
+            templ.PushBack({CKA_CLASS, Array<uint8_t>(reinterpret_cast<uint8_t*>(&dataClass), sizeof(dataClass))})
+                .IsNone());
+        ASSERT_TRUE(templ.PushBack({CKA_TOKEN, Array<uint8_t>(reinterpret_cast<uint8_t*>(&trueVal), sizeof(trueVal))})
+                        .IsNone());
+        ASSERT_TRUE(templ.PushBack({CKA_PRIVATE, Array<uint8_t>(reinterpret_cast<uint8_t*>(&trueVal), sizeof(trueVal))})
+                        .IsNone());
+        ASSERT_TRUE(
+            templ
+                .PushBack({CKA_LABEL,
+                    Array<uint8_t>(const_cast<uint8_t*>(reinterpret_cast<const uint8_t*>(label.Get())), label.Size())})
+                .IsNone());
+        ASSERT_TRUE(
+            templ.PushBack({CKA_VALUE, Array<uint8_t>(const_cast<uint8_t*>(value.Get()), value.Size())}).IsNone());
+
+        pkcs11::ObjectHandle handle    = 0;
+        Error                createErr = ErrorEnum::eNone;
+
+        Tie(handle, createErr) = session->CreateObject(templ);
+        ASSERT_TRUE(createErr.IsNone());
     }
 
     void GeneratePrivateKey(const Array<uint8_t>& id)
@@ -342,6 +378,69 @@ TEST_F(CertloaderTest, FindCertificatesFromFile)
 
     ASSERT_TRUE(mCryptoProvider->ASN1DecodeDN((*chain)[1].mIssuer, issuer).IsNone());
     EXPECT_EQ(std::string(issuer.CStr()), std::string("CN=Aos Cloud"));
+}
+
+TEST_F(CertloaderTest, LoadDataByURL)
+{
+    constexpr uint8_t value[]
+        = {0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F, 0x10};
+
+    WriteDataObject("aos-layer-key", Array(value, ArraySize(value)));
+
+    // the URL's own object/id identify a cert/key and are irrelevant to LoadDataByURL (only token/library/PIN
+    // are used), but ParsePKCS11URL requires them to be present syntactically.
+    const auto url = "pkcs11:token=cryptoutils;object=cryptoutils;id=%00%01%02?module-path=" SOFTHSM2_LIB "&pin-source="
+        + std::string(mPINSource);
+
+    StaticArray<uint8_t, ArraySize(value)> data;
+
+    ASSERT_TRUE(mCertLoader.LoadDataByURL(url.c_str(), "aos-layer-key", data).IsNone());
+    EXPECT_EQ(data, Array(value, ArraySize(value)));
+}
+
+TEST_F(CertloaderTest, LoadDataByURLNotFound)
+{
+    const auto url = "pkcs11:token=cryptoutils;object=cryptoutils;id=%00%01%02?module-path=" SOFTHSM2_LIB "&pin-source="
+        + std::string(mPINSource);
+
+    StaticArray<uint8_t, 32> data;
+
+    ASSERT_TRUE(mCertLoader.LoadDataByURL(url.c_str(), "no-such-label", data).Is(ErrorEnum::eNotFound));
+}
+
+TEST_F(CertloaderTest, LoadDataByURLUnsupportedScheme)
+{
+    StaticArray<uint8_t, 32> data;
+
+    ASSERT_TRUE(
+        mCertLoader.LoadDataByURL("file:/tmp/aos-layer-key", "aos-layer-key", data).Is(ErrorEnum::eNotSupported));
+}
+
+TEST_F(CertloaderTest, LoadDataByURLBadScheme)
+{
+    StaticArray<uint8_t, 32> data;
+
+    // no ":" at all, so ParseURLScheme itself fails.
+    ASSERT_FALSE(mCertLoader.LoadDataByURL("not-a-url", "aos-layer-key", data).IsNone());
+}
+
+TEST_F(CertloaderTest, LoadDataByURLBadPKCS11URL)
+{
+    StaticArray<uint8_t, 32> data;
+
+    // "object" and "id" are mandatory for ParsePKCS11URL, even though LoadDataByURL itself ignores them.
+    ASSERT_FALSE(mCertLoader.LoadDataByURL("pkcs11:token=cryptoutils", "aos-layer-key", data).IsNone());
+}
+
+TEST_F(CertloaderTest, LoadDataByURLOpenSessionFailure)
+{
+    const auto url = "pkcs11:token=no-such-token;object=cryptoutils;id=%00%01%02?module-path=" SOFTHSM2_LIB
+                     "&pin-source="
+        + std::string(mPINSource);
+
+    StaticArray<uint8_t, 32> data;
+
+    ASSERT_FALSE(mCertLoader.LoadDataByURL(url.c_str(), "aos-layer-key", data).IsNone());
 }
 
 } // namespace aos::crypto

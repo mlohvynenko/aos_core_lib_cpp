@@ -21,6 +21,7 @@ class CertLoaderMock : public CertLoaderItf {
 public:
     MOCK_METHOD(RetWithError<SharedPtr<x509::CertificateChain>>, LoadCertsChainByURL, (const String&), (override));
     MOCK_METHOD(RetWithError<SharedPtr<PrivateKeyItf>>, LoadPrivKeyByURL, (const String&), (override));
+    MOCK_METHOD(Error, LoadDataByURL, (const String&, const String&, Array<uint8_t>&), (override));
 };
 
 } // namespace aos::crypto

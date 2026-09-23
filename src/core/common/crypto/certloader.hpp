@@ -47,6 +47,16 @@ public:
      */
     RetWithError<SharedPtr<PrivateKeyItf>> LoadPrivKeyByURL(const String& url) override;
 
+    /**
+     * Loads an opaque data object by URL and label.
+     *
+     * @param url input url.
+     * @param dataLabel label of the data object to read.
+     * @param[out] data result data bytes.
+     * @return Error.
+     */
+    Error LoadDataByURL(const String& url, const String& dataLabel, Array<uint8_t>& data) override;
+
 private:
     using PEMCertChainBlob = StaticString<cCertPEMLen * cCertChainSize>;
 

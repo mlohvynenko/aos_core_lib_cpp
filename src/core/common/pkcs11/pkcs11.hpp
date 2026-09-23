@@ -800,6 +800,15 @@ public:
     Error DeleteCertificate(const Array<uint8_t>& id, const String& label);
 
     /**
+     * Retrieves a previously imported data blob.
+     *
+     * @param label data object label.
+     * @param[out] value result data bytes.
+     * @return Error.
+     */
+    Error FindData(const String& label, Array<uint8_t>& value) const;
+
+    /**
      * Converts PKCS11 byte array to string.
      *
      * @param src source byte array.
