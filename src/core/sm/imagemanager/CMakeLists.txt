@@ -14,13 +14,23 @@ set(TARGET_NAME imagemanager)
 # Sources
 # ######################################################################################################################
 
-set(SOURCES imagemanager.cpp)
+set(SOURCES blobdecryptor.cpp imagemanager.cpp keyprovider.cpp)
 
 # ######################################################################################################################
 # Headers
 # ######################################################################################################################
 
-set(HEADERS itf/blobinfoprovider.hpp itf/imagemanager.hpp itf/iteminfoprovider.hpp config.hpp imagemanager.hpp)
+set(HEADERS
+    itf/blobdecryptor.hpp
+    itf/blobinfoprovider.hpp
+    itf/imagemanager.hpp
+    itf/iteminfoprovider.hpp
+    itf/keyprovider.hpp
+    blobdecryptor.hpp
+    config.hpp
+    imagemanager.hpp
+    keyprovider.hpp
+)
 
 # ######################################################################################################################
 # Libraries
