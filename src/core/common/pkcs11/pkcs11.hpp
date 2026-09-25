@@ -745,7 +745,10 @@ public:
         const Array<uint8_t>& id, const String& label, EllipticCurve curve);
 
     /**
-     * Retrieves a previously created asymmetric key pair.
+     * Retrieves a previously created key by id/label: an asymmetric (RSA/ECDSA) key pair, or a CKO_SECRET_KEY
+     * (AES) object wrapped as an aos::crypto::PrivateKeyItf whose GetPublic/Sign are simply not supported
+     * (AESPrivateKey), so callers that only need PrivateKeyItf::Decrypt don't need to know which one they got.
+     * The returned PrivateKey's pub handle is 0 for the AES case.
      *
      * @param id key id.
      * @param label key label.
@@ -798,15 +801,6 @@ public:
      * @return Error.
      */
     Error DeleteCertificate(const Array<uint8_t>& id, const String& label);
-
-    /**
-     * Retrieves a previously imported data blob.
-     *
-     * @param label data object label.
-     * @param[out] value result data bytes.
-     * @return Error.
-     */
-    Error FindData(const String& label, Array<uint8_t>& value) const;
 
     /**
      * Converts PKCS11 byte array to string.

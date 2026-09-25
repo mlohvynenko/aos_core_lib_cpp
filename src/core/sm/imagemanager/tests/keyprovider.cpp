@@ -5,11 +5,11 @@
  */
 
 #include <string>
-#include <vector>
 
 #include <gmock/gmock.h>
 
 #include <core/common/tests/mocks/certprovidermock.hpp>
+#include <core/common/tests/mocks/cryptomock.hpp>
 #include <core/common/tests/utils/log.hpp>
 #include <core/common/tools/heapallocator.hpp>
 #include <core/iam/tests/mocks/certloadermock.hpp>
@@ -21,20 +21,11 @@ namespace aos::sm::imagemanager {
 
 namespace {
 
-constexpr auto cCertType  = "diskencryption";
-constexpr auto cKeyURL    = "pkcs11:token=aoscore;object=diskencryption?module-path=/lib/softhsm.so&pin-source=/pin";
-constexpr auto cDataLabel = "aos-layer-key";
-
-std::vector<uint8_t> MakeKey(uint8_t seed, size_t size = 32)
-{
-    std::vector<uint8_t> key(size);
-
-    for (size_t i = 0; i < size; i++) {
-        key[i] = static_cast<uint8_t>(seed + i);
-    }
-
-    return key;
-}
+constexpr auto cCertType = "diskencryption";
+// the id/label embedded in this URL are what LoadPrivKeyByURL uses to resolve the layer key itself: this
+// "diskencryption" cert module is dedicated to pointing at it, not at a real TLS keypair.
+constexpr auto cKeyURL
+    = "pkcs11:token=aoscore;object=aos-layer-key;id=%00%01%02?module-path=/lib/softhsm.so&pin-source=/pin";
 
 Action<Error(const String&, const Array<uint8_t>&, const Array<uint8_t>&, CertInfo&)> ReturnCert(const char* keyURL)
 {
@@ -45,10 +36,11 @@ Action<Error(const String&, const Array<uint8_t>&, const Array<uint8_t>&, CertIn
     });
 }
 
-Action<Error(const String&, const String&, Array<uint8_t>&)> ReturnData(const std::vector<uint8_t>& data)
+Action<RetWithError<SharedPtr<crypto::PrivateKeyItf>>(const String&)> ReturnKey(
+    const SharedPtr<crypto::PrivateKeyItf>& key)
 {
-    return Invoke([data](const String&, const String&, Array<uint8_t>& out) {
-        return out.Assign(Array<uint8_t>(data.data(), data.size()));
+    return Invoke([key](const String&) -> RetWithError<SharedPtr<crypto::PrivateKeyItf>> {
+        return {key, ErrorEnum::eNone};
     });
 }
 
@@ -77,12 +69,16 @@ protected:
         tests::utils::InitLog();
 
         ASSERT_TRUE(mProvider.Init(mAllocator, mCertProvider, mCertLoader, cCertType).IsNone());
+
+        mKey = MakeShared<StrictMock<crypto::PrivateKeyMock>>(&mAllocator);
+        ASSERT_TRUE(mKey);
     }
 
     HeapAllocator mAllocator;
 
-    StrictMock<iamclient::CertProviderMock> mCertProvider;
-    StrictMock<crypto::CertLoaderMock>      mCertLoader;
+    StrictMock<iamclient::CertProviderMock>       mCertProvider;
+    StrictMock<crypto::CertLoaderMock>            mCertLoader;
+    SharedPtr<StrictMock<crypto::PrivateKeyMock>> mKey;
 
     KeyProvider mProvider;
 };
@@ -91,10 +87,8 @@ protected:
  * Tests
  **********************************************************************************************************************/
 
-TEST_F(LocalDataKeyProviderTest, GetKeyReadsDataObjectFromTokenOfTheCert)
+TEST_F(LocalDataKeyProviderTest, GetKeyReadsSecretKeyFromTokenOfTheCert)
 {
-    const auto expectedKey = MakeKey(1);
-
     EXPECT_CALL(mCertProvider, GetCert(_, _, _, _))
         .WillOnce(Invoke(
             [](const String& certType, const Array<uint8_t>& issuer, const Array<uint8_t>& serial, CertInfo& info) {
@@ -107,94 +101,76 @@ TEST_F(LocalDataKeyProviderTest, GetKeyReadsDataObjectFromTokenOfTheCert)
                 return ErrorEnum::eNone;
             }));
 
-    EXPECT_CALL(mCertLoader, LoadDataByURL(_, _, _))
-        .WillOnce(Invoke([&](const String& url, const String& label, Array<uint8_t>& out) {
+    EXPECT_CALL(mCertLoader, LoadPrivKeyByURL(_))
+        .WillOnce(Invoke([&](const String& url) -> RetWithError<SharedPtr<crypto::PrivateKeyItf>> {
             EXPECT_STREQ(url.CStr(), cKeyURL);
-            EXPECT_STREQ(label.CStr(), cDataLabel);
 
-            return out.Assign(Array<uint8_t>(expectedKey.data(), expectedKey.size()));
+            return {mKey, ErrorEnum::eNone};
         }));
 
-    StaticArray<uint8_t, crypto::cKeySize> key;
+    auto [key, err] = mProvider.GetKey();
 
-    ASSERT_TRUE(mProvider.GetKey(key).IsNone());
-
-    EXPECT_EQ(std::vector<uint8_t>(key.begin(), key.end()), expectedKey);
+    ASSERT_TRUE(err.IsNone());
+    EXPECT_EQ(key.Get(), mKey.Get());
 }
 
-TEST_F(LocalDataKeyProviderTest, GetKeyDoesNotUseCertPrivateKey)
+TEST_F(LocalDataKeyProviderTest, GetKeyDoesNotUseCertsChain)
 {
-    // StrictMock: any LoadPrivKeyByURL / LoadCertsChainByURL call would fail the test, as the cert is only
-    // used to locate the token.
+    // StrictMock: a LoadCertsChainByURL call would fail the test, as the cert is only used to locate the
+    // token/key.
     EXPECT_CALL(mCertProvider, GetCert(_, _, _, _)).WillOnce(ReturnCert(cKeyURL));
-    EXPECT_CALL(mCertLoader, LoadDataByURL(_, _, _)).WillOnce(ReturnData(MakeKey(2)));
+    EXPECT_CALL(mCertLoader, LoadPrivKeyByURL(_)).WillOnce(ReturnKey(mKey));
 
-    StaticArray<uint8_t, crypto::cKeySize> key;
+    auto [key, err] = mProvider.GetKey();
 
-    ASSERT_TRUE(mProvider.GetKey(key).IsNone());
+    ASSERT_TRUE(err.IsNone());
 }
 
 TEST_F(LocalDataKeyProviderTest, KeyIsCachedAfterFirstFetch)
 {
-    const auto expectedKey = MakeKey(3);
-
     EXPECT_CALL(mCertProvider, GetCert(_, _, _, _)).Times(1).WillOnce(ReturnCert(cKeyURL));
-    EXPECT_CALL(mCertLoader, LoadDataByURL(_, _, _)).Times(1).WillOnce(ReturnData(expectedKey));
+    EXPECT_CALL(mCertLoader, LoadPrivKeyByURL(_)).Times(1).WillOnce(ReturnKey(mKey));
 
-    StaticArray<uint8_t, crypto::cKeySize> first, second;
+    auto [first, firstErr]   = mProvider.GetKey();
+    auto [second, secondErr] = mProvider.GetKey();
 
-    ASSERT_TRUE(mProvider.GetKey(first).IsNone());
-    ASSERT_TRUE(mProvider.GetKey(second).IsNone());
-
-    EXPECT_EQ(std::vector<uint8_t>(first.begin(), first.end()), expectedKey);
-    EXPECT_EQ(std::vector<uint8_t>(second.begin(), second.end()), expectedKey);
+    ASSERT_TRUE(firstErr.IsNone());
+    ASSERT_TRUE(secondErr.IsNone());
+    EXPECT_EQ(first.Get(), mKey.Get());
+    EXPECT_EQ(second.Get(), mKey.Get());
 }
 
 TEST_F(LocalDataKeyProviderTest, GetCertFailureIsReturnedAndRetried)
 {
-    const auto expectedKey = MakeKey(4);
-
     EXPECT_CALL(mCertProvider, GetCert(_, _, _, _))
         .WillOnce(Return(ErrorEnum::eNotFound))
         .WillOnce(ReturnCert(cKeyURL));
-    EXPECT_CALL(mCertLoader, LoadDataByURL(_, _, _)).WillOnce(ReturnData(expectedKey));
+    EXPECT_CALL(mCertLoader, LoadPrivKeyByURL(_)).WillOnce(ReturnKey(mKey));
 
-    StaticArray<uint8_t, crypto::cKeySize> key;
-
-    EXPECT_TRUE(mProvider.GetKey(key).Is(ErrorEnum::eNotFound));
-    EXPECT_TRUE(key.IsEmpty());
+    auto [failedKey, failedErr] = mProvider.GetKey();
+    EXPECT_TRUE(failedErr.Is(ErrorEnum::eNotFound));
+    EXPECT_FALSE(failedKey);
 
     // A failed fetch must not be cached: the next call tries again.
-    ASSERT_TRUE(mProvider.GetKey(key).IsNone());
-    EXPECT_EQ(std::vector<uint8_t>(key.begin(), key.end()), expectedKey);
+    auto [key, err] = mProvider.GetKey();
+    ASSERT_TRUE(err.IsNone());
+    EXPECT_EQ(key.Get(), mKey.Get());
 }
 
-TEST_F(LocalDataKeyProviderTest, LoadDataFailureIsReturnedAndRetried)
+TEST_F(LocalDataKeyProviderTest, LoadKeyFailureIsReturnedAndRetried)
 {
-    const auto expectedKey = MakeKey(5);
-
     EXPECT_CALL(mCertProvider, GetCert(_, _, _, _)).Times(2).WillRepeatedly(ReturnCert(cKeyURL));
-    EXPECT_CALL(mCertLoader, LoadDataByURL(_, _, _))
-        .WillOnce(Return(ErrorEnum::eNotFound))
-        .WillOnce(ReturnData(expectedKey));
+    EXPECT_CALL(mCertLoader, LoadPrivKeyByURL(_))
+        .WillOnce(Return(RetWithError<SharedPtr<crypto::PrivateKeyItf>>(nullptr, ErrorEnum::eNotFound)))
+        .WillOnce(ReturnKey(mKey));
 
-    StaticArray<uint8_t, crypto::cKeySize> key;
+    auto [failedKey, failedErr] = mProvider.GetKey();
+    EXPECT_TRUE(failedErr.Is(ErrorEnum::eNotFound));
+    EXPECT_FALSE(failedKey);
 
-    EXPECT_TRUE(mProvider.GetKey(key).Is(ErrorEnum::eNotFound));
-    EXPECT_TRUE(key.IsEmpty());
-
-    ASSERT_TRUE(mProvider.GetKey(key).IsNone());
-    EXPECT_EQ(std::vector<uint8_t>(key.begin(), key.end()), expectedKey);
-}
-
-TEST_F(LocalDataKeyProviderTest, GetKeyFailsIfOutputBufferIsTooSmall)
-{
-    EXPECT_CALL(mCertProvider, GetCert(_, _, _, _)).WillOnce(ReturnCert(cKeyURL));
-    EXPECT_CALL(mCertLoader, LoadDataByURL(_, _, _)).WillOnce(ReturnData(MakeKey(6, 32)));
-
-    StaticArray<uint8_t, 16> tooSmall;
-
-    EXPECT_TRUE(mProvider.GetKey(tooSmall).Is(ErrorEnum::eNoMemory));
+    auto [key, err] = mProvider.GetKey();
+    ASSERT_TRUE(err.IsNone());
+    EXPECT_EQ(key.Get(), mKey.Get());
 }
 
 TEST(LocalDataKeyProviderInitTest, InitFailsIfCertTypeIsTooLong)
@@ -220,10 +196,10 @@ TEST(LocalDataKeyProviderInitTest, GetKeyFailsIfAllocatorIsOutOfMemory)
 
     allocator.mFail = true;
 
-    StaticArray<uint8_t, 32> key;
-
-    // neither GetCert nor LoadDataByURL is reached (StrictMock): the temporary CertInfo can't be allocated.
-    EXPECT_TRUE(provider.GetKey(key).Is(ErrorEnum::eNoMemory));
+    // neither GetCert nor LoadPrivKeyByURL is reached (StrictMock): the temporary CertInfo can't be
+    // allocated.
+    auto [key, err] = provider.GetKey();
+    EXPECT_TRUE(err.Is(ErrorEnum::eNoMemory));
 }
 
 } // namespace aos::sm::imagemanager

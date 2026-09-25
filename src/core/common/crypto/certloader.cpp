@@ -163,38 +163,6 @@ RetWithError<SharedPtr<pkcs11::SessionContext>> CertLoader::OpenSession(
     return {Move(session), ErrorEnum::eNone};
 }
 
-Error CertLoader::LoadDataByURL(const String& url, const String& dataLabel, Array<uint8_t>& data)
-{
-    LOG_DBG() << "Load data by URL" << Log::Field("url", url) << Log::Field("dataLabel", dataLabel);
-
-    StaticString<cSchemeMaxLength> scheme;
-
-    if (auto err = ParseURLScheme(url, scheme); !err.IsNone()) {
-        return err;
-    }
-
-    if (scheme != cSchemePKCS11) {
-        return AOS_ERROR_WRAP(ErrorEnum::eNotSupported);
-    }
-
-    StaticString<cFilePathLen>            library;
-    StaticString<pkcs11::cLabelLen>       token;
-    StaticString<pkcs11::cLabelLen>       label;
-    StaticArray<uint8_t, pkcs11::cIDSize> id;
-    StaticString<pkcs11::cPINLen>         userPIN;
-
-    if (auto err = ParsePKCS11URL(url, library, token, label, id, userPIN); !err.IsNone()) {
-        return err;
-    }
-
-    auto [session, sessionErr] = OpenSession(library, token, userPIN);
-    if (!sessionErr.IsNone()) {
-        return sessionErr;
-    }
-
-    return pkcs11::Utils(*mAllocator, session, *mCryptoProvider).FindData(dataLabel, data);
-}
-
 RetWithError<pkcs11::SlotID> CertLoader::FindToken(const pkcs11::LibraryContext& library, const String& token)
 {
     StaticArray<pkcs11::SlotID, pkcs11::cSlotListSize> slotList;

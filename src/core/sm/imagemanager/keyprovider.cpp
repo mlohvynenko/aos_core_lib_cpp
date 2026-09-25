@@ -28,37 +28,40 @@ Error KeyProvider::Init(AllocatorItf& allocator, iamclient::CertProviderItf& cer
     return ErrorEnum::eNone;
 }
 
-Error KeyProvider::GetKey(Array<uint8_t>& key)
+RetWithError<SharedPtr<crypto::PrivateKeyItf>> KeyProvider::GetKey()
 {
     LockGuard lock(mMutex);
 
-    if (!mFetched) {
-        if (auto err = Fetch(); !err.IsNone()) {
-            return AOS_ERROR_WRAP(err);
-        }
-
-        mFetched = true;
+    if (mKey) {
+        return {mKey, ErrorEnum::eNone};
     }
 
-    return key.Assign(mKey);
+    return Fetch();
 }
 
 /***********************************************************************************************************************
  * Private
  **********************************************************************************************************************/
 
-Error KeyProvider::Fetch()
+RetWithError<SharedPtr<crypto::PrivateKeyItf>> KeyProvider::Fetch()
 {
     auto certInfo = MakeUnique<CertInfo>(mAllocator);
     if (!certInfo) {
-        return AOS_ERROR_WRAP(ErrorEnum::eNoMemory);
+        return {nullptr, AOS_ERROR_WRAP(ErrorEnum::eNoMemory)};
     }
 
     if (auto err = mCertProvider->GetCert(mCertType, {}, {}, *certInfo); !err.IsNone()) {
-        return AOS_ERROR_WRAP(err);
+        return {nullptr, AOS_ERROR_WRAP(err)};
     }
 
-    return mCertLoader->LoadDataByURL(certInfo->mKeyURL, cKeyDataLabel, mKey);
+    auto [key, err] = mCertLoader->LoadPrivKeyByURL(certInfo->mKeyURL);
+    if (!err.IsNone()) {
+        return {nullptr, err};
+    }
+
+    mKey = key;
+
+    return {mKey, ErrorEnum::eNone};
 }
 
 } // namespace aos::sm::imagemanager

@@ -8,10 +8,12 @@
 #define AOS_CORE_COMMON_CRYPTO_ITF_PRIVKEY_HPP_
 
 #include <core/common/config.hpp>
+#include <core/common/tools/array.hpp>
 #include <core/common/tools/enum.hpp>
 #include <core/common/tools/string.hpp>
 #include <core/common/tools/variant.hpp>
 
+#include "aes.hpp"
 #include "hash.hpp"
 
 namespace aos::crypto {
@@ -78,9 +80,19 @@ struct OAEPDecryptionOptions {
 };
 
 /**
+ * AES-GCM decryption options.
+ */
+struct GCMDecryptionOptions {
+    /**
+     * GCM initialization vector (nonce): AESCipherItf::cGCMIVSize (12) bytes.
+     */
+    StaticArray<uint8_t, AESCipherItf::cGCMIVSize> mIV;
+};
+
+/**
  * Decryption options.
  */
-using DecryptionOptions = Variant<PKCS1v15DecryptionOptions, OAEPDecryptionOptions>;
+using DecryptionOptions = Variant<PKCS1v15DecryptionOptions, OAEPDecryptionOptions, GCMDecryptionOptions>;
 
 /**
  * Public key interface.

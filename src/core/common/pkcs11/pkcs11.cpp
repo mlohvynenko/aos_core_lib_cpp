@@ -1170,6 +1170,38 @@ RetWithError<PrivateKey> Utils::FindPrivateKey(const Array<uint8_t>& id, const S
 
     LOG_DBG() << "Find private key: id=" << idStr << ", label=" << label;
 
+    // A symmetric AES key has no public part, so it never matches the CKO_PRIVATE_KEY/CKO_PUBLIC_KEY pairing
+    // search below; try it first as a CKO_SECRET_KEY object with the same id/label.
+    CK_OBJECT_CLASS secretKeyClass = CKO_SECRET_KEY;
+    CK_KEY_TYPE     keyTypeAES     = CKK_AES;
+
+    StaticArray<ObjectAttribute, cObjectAttributesCount> secretKeyTempl;
+
+    (void)secretKeyTempl.PushBack({CKA_CLASS, ConvertToAttributeValue(secretKeyClass)});
+    (void)secretKeyTempl.PushBack({CKA_KEY_TYPE, ConvertToAttributeValue(keyTypeAES)});
+    (void)secretKeyTempl.PushBack({CKA_ID, id});
+    (void)secretKeyTempl.PushBack({CKA_LABEL, ConvertToAttributeValue(label)});
+
+    StaticArray<ObjectHandle, cKeysPerToken> secretKeys;
+
+    // SessionContext::FindObjects itself returns eNotFound (not just an empty result) when nothing matches:
+    // that's the expected, common case here (most keys are RSA/ECDSA), not a real failure, so it must not
+    // short-circuit the CKO_PRIVATE_KEY/CKO_PUBLIC_KEY search below.
+    if (auto err = mSession->FindObjects(secretKeyTempl, secretKeys); !err.IsNone() && !err.Is(ErrorEnum::eNotFound)) {
+        return {{}, AOS_ERROR_WRAP(err)};
+    }
+
+    if (!secretKeys.IsEmpty()) {
+        // even after pinning class/key type/id/label, a collision between two such objects is still possible
+        // and would silently pick an arbitrary one; treat that as an error instead of guessing.
+        if (secretKeys.Size() > 1) {
+            return {
+                {}, AOS_ERROR_WRAP(Error(ErrorEnum::eInvalidArgument, "id/label matches more than one secret key"))};
+        }
+
+        return ExportPrivateKey(secretKeys[0], 0, keyTypeAES);
+    }
+
     constexpr auto cSingleAttribute = 1;
 
     CK_OBJECT_CLASS privKeyClass = CKO_PRIVATE_KEY;
@@ -1413,47 +1445,6 @@ Error Utils::DeleteCertificate(const Array<uint8_t>& id, const String& label)
     return ErrorEnum::eNone;
 }
 
-Error Utils::FindData(const String& label, Array<uint8_t>& value) const
-{
-    CK_OBJECT_CLASS dataClass = CKO_DATA;
-
-    StaticArray<ObjectAttribute, cObjectAttributesCount> dataTempl;
-
-    if (auto err = dataTempl.PushBack({CKA_CLASS, ConvertToAttributeValue(dataClass)}); !err.IsNone()) {
-        return AOS_ERROR_WRAP(err);
-    }
-
-    if (auto err = dataTempl.PushBack({CKA_LABEL, ConvertToAttributeValue(label)}); !err.IsNone()) {
-        return AOS_ERROR_WRAP(err);
-    }
-
-    StaticArray<ObjectHandle, cKeysPerToken> handles;
-
-    if (auto err = mSession->FindObjects(dataTempl, handles); !err.IsNone()) {
-        return AOS_ERROR_WRAP(err);
-    }
-
-    if (handles.IsEmpty()) {
-        return AOS_ERROR_WRAP(ErrorEnum::eNotFound);
-    }
-
-    StaticArray<AttributeType, 1> types;
-    if (auto err = types.PushBack(CKA_VALUE); !err.IsNone()) {
-        return AOS_ERROR_WRAP(err);
-    }
-
-    StaticArray<Array<uint8_t>, 1> values;
-    if (auto err = values.PushBack(value); !err.IsNone()) {
-        return AOS_ERROR_WRAP(err);
-    }
-
-    if (auto err = mSession->GetAttributeValues(handles[0], types, values); !err.IsNone()) {
-        return AOS_ERROR_WRAP(err);
-    }
-
-    return value.Assign(values[0]);
-}
-
 Error Utils::ConvertPKCS11String(const Array<uint8_t>& src, String& dst)
 {
     return ConvertFromPKCS11String(src, dst);
@@ -1463,6 +1454,16 @@ RetWithError<PrivateKey> Utils::ExportPrivateKey(
     ObjectHandle privKeyHandle, ObjectHandle pubKeyHandle, CK_KEY_TYPE keyType)
 {
     switch (keyType) {
+    case CKK_AES: {
+        // no public part to look up: pubKeyHandle is unused (0) for a symmetric key.
+        auto cryptoKey = MakeShared<AESPrivateKey>(&mAllocator, mSession, privKeyHandle);
+        if (!cryptoKey) {
+            return {{}, AOS_ERROR_WRAP(ErrorEnum::eNoMemory)};
+        }
+
+        return {PrivateKey {privKeyHandle, 0, cryptoKey}, ErrorEnum::eNone};
+    }
+
     case CKK_RSA: {
         StaticArray<Array<uint8_t>, cObjectAttributesCount> attrValues;
         StaticArray<AttributeType, cObjectAttributesCount>  attrTypes;

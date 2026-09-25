@@ -4,10 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-#include <sys/resource.h>
-
 #include <algorithm>
-#include <csignal>
 #include <filesystem>
 #include <fstream>
 #include <functional>
@@ -17,15 +14,17 @@
 
 #include <gmock/gmock.h>
 
-#include <core/common/crypto/cryptohelper.hpp>
+#include <core/common/crypto/certloader.hpp>
 #include <core/common/crypto/tests/gcmtestvector.hpp>
 #include <core/common/tests/crypto/providers/cryptofactory.hpp>
+#include <core/common/tests/crypto/softhsmenv.hpp>
 #include <core/common/tests/mocks/certprovidermock.hpp>
 #include <core/common/tests/mocks/cryptomock.hpp>
 #include <core/common/tests/utils/log.hpp>
+#include <core/common/tools/fs.hpp>
 #include <core/common/tools/heapallocator.hpp>
-#include <core/iam/tests/mocks/certloadermock.hpp>
 #include <core/sm/imagemanager/blobdecryptor.hpp>
+#include <core/sm/imagemanager/keyprovider.hpp>
 
 using namespace testing;
 
@@ -33,15 +32,13 @@ namespace aos::sm::imagemanager {
 
 namespace {
 
-constexpr auto cTestDir = "/tmp/localblobdecryptor_test";
-constexpr auto cAlg     = "AES256/GCM";
+constexpr auto cTestDir = "/tmp/blobdecryptor_test";
 constexpr auto cIVLen   = crypto::AESCipherItf::cGCMIVSize;
 constexpr auto cTagLen  = crypto::AESCipherItf::cGCMTagSize;
-constexpr auto cCACert  = CERTIFICATES_DIR "/ca.pem";
 
 class KeyProviderMock : public SymmetricKeyProviderItf {
 public:
-    MOCK_METHOD(Error, GetKey, (Array<uint8_t>&), (override));
+    MOCK_METHOD(RetWithError<SharedPtr<crypto::PrivateKeyItf>>, GetKey, (), (override));
 };
 
 using Bytes = std::vector<uint8_t>;
@@ -55,11 +52,6 @@ Bytes Pattern(size_t size, uint8_t seed)
     }
 
     return result;
-}
-
-Bytes ToBytes(const Array<uint8_t>& array)
-{
-    return {array.begin(), array.end()};
 }
 
 void WriteBytes(const std::string& path, const Bytes& data)
@@ -85,52 +77,13 @@ Bytes Concat(const Bytes& first, const Bytes& second)
     return result;
 }
 
-Action<Error(Array<uint8_t>&)> ReturnKey(const Bytes& key)
-{
-    return Invoke([key](Array<uint8_t>& out) { return out.Assign(Array<uint8_t>(key.data(), key.size())); });
-}
-
-// Allocator that can be switched to fail, to exercise out-of-memory paths.
-class SwitchAllocator : public AllocatorItf {
-public:
-    void* Allocate(size_t size) override { return mFail ? nullptr : mHeap.Allocate(size); }
-    void  Free(void* data) override { mHeap.Free(data); }
-
-    bool mFail = false;
-
-private:
-    HeapAllocator mHeap;
-};
-
-// Limits the size of files the process can write while the object is alive, to exercise write-failure paths.
-class FileSizeLimit {
-public:
-    explicit FileSizeLimit(rlim_t size)
-    {
-        getrlimit(RLIMIT_FSIZE, &mOld);
-
-        auto limit     = mOld;
-        limit.rlim_cur = size;
-
-        mOldHandler = signal(SIGXFSZ, SIG_IGN);
-        setrlimit(RLIMIT_FSIZE, &limit);
-    }
-
-    ~FileSizeLimit()
-    {
-        setrlimit(RLIMIT_FSIZE, &mOld);
-        signal(SIGXFSZ, mOldHandler);
-    }
-
-private:
-    rlimit       mOld {};
-    sighandler_t mOldHandler {};
-};
-
 } // namespace
 
 /***********************************************************************************************************************
- * Suite: mocked crypto helper
+ * Suite: mocked key - covers BlobDecryptor's own responsibilities (splitting the IV off the file, staging
+ * output, renaming into place only on success) without a real PKCS11 module. The actual AES-GCM
+ * encrypt/decrypt/tamper-detection behavior lives in pkcs11::AESPrivateKey and is exercised end-to-end by
+ * the round-trip suite below, against a real PKCS11 module.
  **********************************************************************************************************************/
 
 class BlobDecryptorTest : public Test {
@@ -139,196 +92,95 @@ protected:
     {
         tests::utils::InitLog();
 
-        std::filesystem::remove_all(cTestDir);
-        std::filesystem::create_directories(cTestDir);
+        ASSERT_TRUE(mDecryptor.Init(mAllocator, mKeyProvider).IsNone());
 
-        ASSERT_TRUE(mDecryptor.Init(mAllocator, mCryptoHelper, mKeyProvider).IsNone());
+        mKey = MakeShared<StrictMock<crypto::PrivateKeyMock>>(&mAllocator);
+        ASSERT_TRUE(mKey);
     }
 
-    void TearDown() override { std::filesystem::remove_all(cTestDir); }
+    void TearDown() override
+    {
+        (void)fs::Remove(mEncryptedPath.c_str());
+        (void)fs::Remove(mDecryptedPath.c_str());
+    }
 
-    const std::string mEncryptedPath = std::string(cTestDir) + "/layer.tar.gz.enc";
-    const std::string mDecryptedPath = std::string(cTestDir) + "/layer.tar.gz.dec";
+    const std::string mEncryptedPath = "/tmp/blobdecryptor_test_layer.tar.gz.enc";
+    const std::string mDecryptedPath = "/tmp/blobdecryptor_test_layer.tar.gz.dec";
 
     HeapAllocator mAllocator;
 
-    StrictMock<crypto::CryptoHelperMock> mCryptoHelper;
-    StrictMock<KeyProviderMock>          mKeyProvider;
+    StrictMock<KeyProviderMock>                   mKeyProvider;
+    SharedPtr<StrictMock<crypto::PrivateKeyMock>> mKey;
 
     BlobDecryptor mDecryptor;
 };
 
-TEST_F(BlobDecryptorTest, SplitsIVFromCiphertextAndPassesDecryptInfo)
+TEST_F(BlobDecryptorTest, SplitsIVAndCallsKeyDecrypt)
 {
     const auto iv         = Pattern(cIVLen, 1);
-    const auto ciphertext = Pattern(64 + cTagLen, 2);
-    const auto key        = Pattern(32, 3);
+    const auto ciphertext = Pattern(1000, 2);
+    const auto tag        = Pattern(cTagLen, 3);
+    const auto plain      = Pattern(1000, 4);
 
-    WriteBytes(mEncryptedPath, Concat(iv, ciphertext));
+    WriteBytes(mEncryptedPath, Concat(Concat(iv, ciphertext), tag));
 
-    EXPECT_CALL(mKeyProvider, GetKey(_)).WillOnce(ReturnKey(key));
+    EXPECT_CALL(mKeyProvider, GetKey())
+        .WillOnce(Return(RetWithError<SharedPtr<crypto::PrivateKeyItf>>(mKey, ErrorEnum::eNone)));
 
-    Bytes seenCiphertext;
-
-    EXPECT_CALL(mCryptoHelper, Decrypt(_, _, _))
+    EXPECT_CALL(*mKey, Decrypt(_, _, _))
         .WillOnce(
-            Invoke([&](const String& encryptedPath, const String& decryptedPath, const crypto::DecryptInfo& info) {
-                EXPECT_STREQ(decryptedPath.CStr(), mDecryptedPath.c_str());
+            Invoke([&](const Array<uint8_t>& cipher, const crypto::DecryptionOptions& options, Array<uint8_t>& result) {
+                const auto& gcmOptions = options.GetValue<crypto::GCMDecryptionOptions>();
 
-                // must decrypt the IV-stripped ciphertext, not the original file
-                EXPECT_STRNE(encryptedPath.CStr(), mEncryptedPath.c_str());
+                EXPECT_EQ(gcmOptions.mIV, Array<uint8_t>(iv.data(), iv.size()));
+                EXPECT_EQ(cipher, Array<uint8_t>(Concat(ciphertext, tag).data(), ciphertext.size() + tag.size()));
 
-                EXPECT_STREQ(info.mBlockAlg.CStr(), cAlg);
-                EXPECT_EQ(ToBytes(info.mBlockIV), iv);
-                EXPECT_EQ(ToBytes(info.mBlockKey), key);
-
-                seenCiphertext = ReadBytes(encryptedPath.CStr());
+                EXPECT_TRUE(result.Assign(Array<uint8_t>(plain.data(), plain.size())).IsNone());
 
                 return ErrorEnum::eNone;
             }));
 
     ASSERT_TRUE(mDecryptor.Decrypt(mEncryptedPath.c_str(), mDecryptedPath.c_str()).IsNone());
-
-    EXPECT_EQ(seenCiphertext, ciphertext);
+    EXPECT_EQ(ReadBytes(mDecryptedPath), plain);
 }
 
-TEST_F(BlobDecryptorTest, CiphertextIsCopiedExactlyForAllSizes)
+TEST_F(BlobDecryptorTest, GetKeyFailureIsReturned)
 {
-    const auto iv  = Pattern(cIVLen, 4);
-    const auto key = Pattern(32, 5);
+    EXPECT_CALL(mKeyProvider, GetKey())
+        .WillOnce(Return(RetWithError<SharedPtr<crypto::PrivateKeyItf>>(nullptr, ErrorEnum::eNotFound)));
 
-    // Around the IV/tag sizes and around the streaming chunk boundaries.
-    const std::vector<size_t> sizes {
-        0, 1, 15, 16, 17, cFileChunkSize - 1, cFileChunkSize, cFileChunkSize + 1, 3 * cFileChunkSize + 7};
-
-    for (const auto size : sizes) {
-        SCOPED_TRACE("ciphertext size " + std::to_string(size));
-
-        const auto ciphertext = Pattern(size, 6);
-        const auto original   = Concat(iv, ciphertext);
-
-        WriteBytes(mEncryptedPath, original);
-
-        EXPECT_CALL(mKeyProvider, GetKey(_)).WillOnce(ReturnKey(key));
-
-        Bytes seenIV, seenCiphertext;
-
-        EXPECT_CALL(mCryptoHelper, Decrypt(_, _, _))
-            .WillOnce(Invoke([&](const String& encryptedPath, const String&, const crypto::DecryptInfo& info) {
-                seenIV         = ToBytes(info.mBlockIV);
-                seenCiphertext = ReadBytes(encryptedPath.CStr());
-
-                return ErrorEnum::eNone;
-            }));
-
-        ASSERT_TRUE(mDecryptor.Decrypt(mEncryptedPath.c_str(), mDecryptedPath.c_str()).IsNone());
-
-        EXPECT_EQ(seenIV, iv);
-        EXPECT_EQ(seenCiphertext, ciphertext);
-
-        // the original encrypted file is left untouched
-        EXPECT_EQ(ReadBytes(mEncryptedPath), original);
-    }
+    // Decrypt must not be reached (StrictMock on mKey): there's no key to call it on. No encrypted file is
+    // even needed on disk: GetKey is checked before anything is read.
+    EXPECT_TRUE(mDecryptor.Decrypt(mEncryptedPath.c_str(), mDecryptedPath.c_str()).Is(ErrorEnum::eNotFound));
 }
 
-TEST_F(BlobDecryptorTest, FileShorterThanIVFails)
+TEST_F(BlobDecryptorTest, EncryptedFileTooShortIsRejectedWithoutCallingKey)
 {
-    for (const size_t size : {0, 1, 11}) {
-        SCOPED_TRACE("file size " + std::to_string(size));
+    EXPECT_CALL(mKeyProvider, GetKey())
+        .WillOnce(Return(RetWithError<SharedPtr<crypto::PrivateKeyItf>>(mKey, ErrorEnum::eNone)));
 
-        WriteBytes(mEncryptedPath, Pattern(size, 7));
-
-        // no key lookup and no decryption must be attempted (StrictMock)
-        EXPECT_TRUE(mDecryptor.Decrypt(mEncryptedPath.c_str(), mDecryptedPath.c_str()).Is(ErrorEnum::eInvalidArgument));
-    }
-}
-
-TEST_F(BlobDecryptorTest, MissingEncryptedFileFails)
-{
-    EXPECT_FALSE(mDecryptor.Decrypt((mEncryptedPath + ".missing").c_str(), mDecryptedPath.c_str()).IsNone());
-}
-
-TEST_F(BlobDecryptorTest, EncryptedPathTooLongForCiphertextSuffixFails)
-{
-    // no key lookup and no decryption must be attempted (StrictMock): building the ".ct" sibling path fails
-    // before either is reached.
-    const std::string longPath = std::string(cTestDir) + "/" + std::string(600, 'a');
-
-    WriteBytes(longPath, Concat(Pattern(cIVLen, 13), Pattern(32, 14)));
-
-    EXPECT_FALSE(mDecryptor.Decrypt(longPath.c_str(), mDecryptedPath.c_str()).IsNone());
-}
-
-TEST_F(BlobDecryptorTest, CiphertextPathIsDirectoryFails)
-{
-    WriteBytes(mEncryptedPath, Concat(Pattern(cIVLen, 15), Pattern(32, 16)));
-
-    // pre-create the ".ct" sibling path as a directory, so opening it for writing fails.
-    std::filesystem::create_directory(mEncryptedPath + ".ct");
-
-    EXPECT_CALL(mKeyProvider, GetKey(_)).Times(0);
+    // shorter than IV + tag: rejected by BlobDecryptor's own size check, key->Decrypt (StrictMock) unreached.
+    WriteBytes(mEncryptedPath, Pattern(cIVLen + cTagLen - 1, 5));
 
     EXPECT_FALSE(mDecryptor.Decrypt(mEncryptedPath.c_str(), mDecryptedPath.c_str()).IsNone());
 }
 
-TEST_F(BlobDecryptorTest, KeyProviderFailureIsReturnedAndTemporaryFileRemoved)
+TEST_F(BlobDecryptorTest, KeyDecryptFailureIsReturnedAndLeavesNoOutput)
 {
-    WriteBytes(mEncryptedPath, Concat(Pattern(cIVLen, 8), Pattern(32, 9)));
+    WriteBytes(mEncryptedPath, Pattern(cIVLen + cTagLen, 6));
 
-    EXPECT_CALL(mKeyProvider, GetKey(_)).WillOnce(Return(ErrorEnum::eNotFound));
-
-    EXPECT_TRUE(mDecryptor.Decrypt(mEncryptedPath.c_str(), mDecryptedPath.c_str()).Is(ErrorEnum::eNotFound));
-
-    // only the original file remains in the directory
-    std::vector<std::string> files;
-
-    for (const auto& entry : std::filesystem::directory_iterator(cTestDir)) {
-        files.push_back(entry.path().string());
-    }
-
-    EXPECT_THAT(files, ElementsAre(mEncryptedPath));
-}
-
-TEST_F(BlobDecryptorTest, CryptoHelperFailureIsReturned)
-{
-    WriteBytes(mEncryptedPath, Concat(Pattern(cIVLen, 10), Pattern(32, 11)));
-
-    EXPECT_CALL(mKeyProvider, GetKey(_)).WillOnce(ReturnKey(Pattern(32, 12)));
-    EXPECT_CALL(mCryptoHelper, Decrypt(_, _, _)).WillOnce(Return(ErrorEnum::eInvalidChecksum));
+    EXPECT_CALL(mKeyProvider, GetKey())
+        .WillOnce(Return(RetWithError<SharedPtr<crypto::PrivateKeyItf>>(mKey, ErrorEnum::eNone)));
+    EXPECT_CALL(*mKey, Decrypt(_, _, _)).WillOnce(Return(ErrorEnum::eInvalidChecksum));
 
     EXPECT_TRUE(mDecryptor.Decrypt(mEncryptedPath.c_str(), mDecryptedPath.c_str()).Is(ErrorEnum::eInvalidChecksum));
-}
-
-TEST_F(BlobDecryptorTest, CiphertextWriteFailureIsReturned)
-{
-    // large enough to span more than one chunk-copy iteration in SplitIV.
-    WriteBytes(mEncryptedPath, Concat(Pattern(cIVLen, 17), Pattern(256 * 1024, 18)));
-
-    // no key lookup and no decryption must be attempted (StrictMock): the ciphertext copy fails first.
-    FileSizeLimit limit(64 * 1024);
-
-    EXPECT_FALSE(mDecryptor.Decrypt(mEncryptedPath.c_str(), mDecryptedPath.c_str()).IsNone());
-}
-
-TEST_F(BlobDecryptorTest, OutOfMemoryDuringCiphertextCopyFails)
-{
-    SwitchAllocator                      allocator;
-    StrictMock<crypto::CryptoHelperMock> cryptoHelper;
-    StrictMock<KeyProviderMock>          keyProvider;
-    BlobDecryptor                        decryptor;
-
-    ASSERT_TRUE(decryptor.Init(allocator, cryptoHelper, keyProvider).IsNone());
-
-    WriteBytes(mEncryptedPath, Concat(Pattern(cIVLen, 19), Pattern(32, 20)));
-
-    allocator.mFail = true;
-
-    // no key lookup and no decryption must be attempted (StrictMock): the chunk buffer can't be allocated.
-    EXPECT_TRUE(decryptor.Decrypt(mEncryptedPath.c_str(), mDecryptedPath.c_str()).Is(ErrorEnum::eNoMemory));
+    EXPECT_FALSE(std::filesystem::exists(mDecryptedPath));
 }
 
 /***********************************************************************************************************************
- * Suite: real crypto helper (encrypt with the crypto provider, decrypt with LocalBlobDecryptor)
+ * Suite: real PKCS11 key (SoftHSM), through the same CertLoader/KeyProvider/BlobDecryptor chain production
+ * code uses - encrypts with an independent software implementation, decrypts through the real PKCS11 path
+ * with a non-extractable key, matching how the key is actually provisioned.
  **********************************************************************************************************************/
 
 class BlobDecryptorRoundTripTest : public Test {
@@ -340,20 +192,90 @@ protected:
         std::filesystem::remove_all(cTestDir);
         std::filesystem::create_directories(cTestDir);
 
-        ASSERT_TRUE(mCryptoFactory.Init(mAllocator).IsNone());
+        ASSERT_TRUE(fs::WriteStringToFile(mPINSource.c_str(), mPIN, 0664).IsNone());
 
+        ASSERT_TRUE(mCryptoFactory.Init(mAllocator).IsNone());
         mCryptoProvider = &mCryptoFactory.GetCryptoProvider();
 
-        ASSERT_TRUE(
-            mCryptoHelper.Init(mAllocator, mCertProvider, *mCryptoProvider, mCertLoader, "http://discovery", cCACert)
-                .IsNone());
+        ASSERT_TRUE(mSoftHSMEnv.Init(mAllocator, mPIN, mTokenLabel).IsNone());
+        ASSERT_TRUE(mCertLoader.Init(mAllocator, *mCryptoProvider, mSoftHSMEnv.GetManager()).IsNone());
+        ASSERT_TRUE(mKeyProvider.Init(mAllocator, mCertProvider, mCertLoader, cCertType).IsNone());
+        ASSERT_TRUE(mDecryptor.Init(mAllocator, mKeyProvider).IsNone());
 
-        ASSERT_TRUE(mDecryptor.Init(mAllocator, mCryptoHelper, mKeyProvider).IsNone());
+        // this cert module is dedicated to the layer key: its key URL's own id/label directly identify the
+        // CKO_SECRET_KEY object imported by ImportSecretKey below (see LoadPrivKeyByURL/FindPrivateKey).
+        const auto url = "pkcs11:token=" + std::string(mTokenLabel) + ";object=" + std::string(cKeyLabel)
+            + ";id=%00%01%02?module-path=" SOFTHSM2_LIB "&pin-source=" + mPINSource;
+
+        EXPECT_CALL(mCertProvider, GetCert(_, _, _, _))
+            .WillRepeatedly(Invoke([url](const String&, const Array<uint8_t>&, const Array<uint8_t>&, CertInfo& info) {
+                info.mKeyURL = url.c_str();
+
+                return ErrorEnum::eNone;
+            }));
     }
 
-    void TearDown() override { std::filesystem::remove_all(cTestDir); }
+    void TearDown() override
+    {
+        std::filesystem::remove_all(cTestDir);
+        (void)fs::Remove(mPINSource.c_str());
+    }
 
-    // Produces the encrypted blob layout: IV | AES-256-GCM ciphertext | authentication tag.
+    // Imports a raw AES key into the token as a non-extractable, non-sensitive-value-readable CKO_SECRET_KEY,
+    // matching how the key is actually provisioned: Decrypt must work without ever reading it back.
+    void ImportSecretKey(const Bytes& key)
+    {
+        Error                             err = ErrorEnum::eNone;
+        SharedPtr<pkcs11::SessionContext> session;
+
+        Tie(session, err) = mSoftHSMEnv.OpenUserSession(mPIN, true);
+        ASSERT_TRUE(err.IsNone());
+
+        CK_OBJECT_CLASS keyClass = CKO_SECRET_KEY;
+        CK_KEY_TYPE     keyType  = CKK_AES;
+        CK_BBOOL        trueVal  = CK_TRUE;
+        CK_BBOOL        falseVal = CK_FALSE;
+
+        constexpr uint8_t idBytes[] = {0x00, 0x01, 0x02};
+
+        StaticArray<uint8_t, pkcs11::cIDSize> id = Array<uint8_t>(idBytes, ArraySize(idBytes));
+
+        // capped at pkcs11::cObjectAttributesCount (10): CreateObject's own internal conversion buffer is
+        // sized to that, regardless of this array's own capacity. CKA_ENCRYPT is left out to make room for
+        // CKA_ID: this key is only ever used to decrypt.
+        StaticArray<pkcs11::ObjectAttribute, pkcs11::cObjectAttributesCount> templ;
+
+        auto pushBytes = [&](pkcs11::AttributeType type, const void* data, size_t size) {
+            ASSERT_TRUE(
+                templ.PushBack({type, Array<uint8_t>(reinterpret_cast<uint8_t*>(const_cast<void*>(data)), size)})
+                    .IsNone());
+        };
+
+        pushBytes(CKA_CLASS, &keyClass, sizeof(keyClass));
+        pushBytes(CKA_KEY_TYPE, &keyType, sizeof(keyType));
+        pushBytes(CKA_TOKEN, &trueVal, sizeof(trueVal));
+        pushBytes(CKA_PRIVATE, &trueVal, sizeof(trueVal));
+        // non-extractable, sensitive: this is the production posture. AESPrivateKey must still be able to
+        // decrypt with it, since it never reads CKA_VALUE.
+        pushBytes(CKA_EXTRACTABLE, &falseVal, sizeof(falseVal));
+        pushBytes(CKA_SENSITIVE, &trueVal, sizeof(trueVal));
+        pushBytes(CKA_DECRYPT, &trueVal, sizeof(trueVal));
+        // must match the "diskencryption" cert module's key URL id/label, since that's what LoadPrivKeyByURL
+        // searches for.
+        pushBytes(CKA_ID, id.Get(), id.Size());
+        pushBytes(CKA_LABEL, cKeyLabel, strlen(cKeyLabel));
+
+        ASSERT_TRUE(templ.PushBack({CKA_VALUE, Array<uint8_t>(const_cast<uint8_t*>(key.data()), key.size())}).IsNone());
+
+        pkcs11::ObjectHandle handle    = 0;
+        Error                createErr = ErrorEnum::eNone;
+
+        Tie(handle, createErr) = session->CreateObject(templ);
+        ASSERT_TRUE(createErr.IsNone());
+    }
+
+    // Produces the encrypted blob layout: IV | AES-256-GCM ciphertext | authentication tag, using the
+    // software crypto provider - independent of the PKCS11 decrypt path under test.
     void Encrypt(const Bytes& key, const Bytes& iv, const Bytes& plain, Bytes& blob)
     {
         auto [cipher, err] = mCryptoProvider->CreateAESEncoder(
@@ -385,41 +307,43 @@ protected:
         blob.insert(blob.end(), tag.begin(), tag.end());
     }
 
-    // Decrypts a blob and returns the error; the decrypted output must not exist unless it succeeded.
-    Error DecryptBlob(const Bytes& blob, const Bytes& key)
+    Error DecryptBlob(const Bytes& blob)
     {
         WriteBytes(mEncryptedPath, blob);
-
-        EXPECT_CALL(mKeyProvider, GetKey(_)).WillOnce(ReturnKey(key));
 
         return mDecryptor.Decrypt(mEncryptedPath.c_str(), mDecryptedPath.c_str());
     }
 
+    static constexpr auto cCertType = "diskencryption";
+    static constexpr auto cKeyLabel = "aos-layer-key";
+
     const std::string mEncryptedPath = std::string(cTestDir) + "/layer.tar.gz.enc";
     const std::string mDecryptedPath = std::string(cTestDir) + "/layer.tar.gz.dec";
+
+    static constexpr auto mTokenLabel = "blobdecryptor-roundtrip";
+    static constexpr auto mPIN        = "admin";
+    const std::string     mPINSource  = std::string(cTestDir) + "/pin.txt";
 
     // mAllocator must be declared first: members are destroyed in reverse declaration order.
     HeapAllocator mAllocator;
 
     crypto::DefaultCryptoFactory mCryptoFactory;
     crypto::CryptoProviderItf*   mCryptoProvider {};
+    test::SoftHSMEnv             mSoftHSMEnv;
+    crypto::CertLoader           mCertLoader;
 
     StrictMock<iamclient::CertProviderMock> mCertProvider;
-    StrictMock<crypto::CertLoaderMock>      mCertLoader;
-    StrictMock<KeyProviderMock>             mKeyProvider;
-
-    crypto::CryptoHelper mCryptoHelper;
-    BlobDecryptor        mDecryptor;
+    KeyProvider                             mKeyProvider;
+    BlobDecryptor                           mDecryptor;
 };
 
 TEST_F(BlobDecryptorRoundTripTest, DecryptsWhatWasEncrypted)
 {
     const auto key = Pattern(32, 20);
 
-    // Around the tag size and around the chunk boundaries the decoder streams the file with (the trailing tag is
-    // held back while reading).
-    const std::vector<size_t> sizes {0, 1, 15, 16, 17, 1000, cFileChunkSize - 17, cFileChunkSize - 16,
-        cFileChunkSize - 15, cFileChunkSize, cFileChunkSize + 1, 3 * cFileChunkSize + 123};
+    ImportSecretKey(key);
+
+    const std::vector<size_t> sizes {0, 1, 15, 16, 17, 1000, cFileChunkSize, 3 * cFileChunkSize + 123};
 
     for (const auto size : sizes) {
         SCOPED_TRACE("plaintext size " + std::to_string(size));
@@ -431,7 +355,7 @@ TEST_F(BlobDecryptorRoundTripTest, DecryptsWhatWasEncrypted)
 
         ASSERT_NO_FATAL_FAILURE(Encrypt(key, iv, plain, blob));
 
-        ASSERT_TRUE(DecryptBlob(blob, key).IsNone());
+        ASSERT_TRUE(DecryptBlob(blob).IsNone());
 
         EXPECT_EQ(ReadBytes(mDecryptedPath), plain);
     }
@@ -452,22 +376,11 @@ TEST_F(BlobDecryptorRoundTripTest, DecryptsBlobProducedByAnIndependentGCMImpleme
     const Bytes plain(aos::crypto::testvectors::cGCMPlain,
         aos::crypto::testvectors::cGCMPlain + sizeof(aos::crypto::testvectors::cGCMPlain));
 
-    ASSERT_TRUE(DecryptBlob(Concat(Concat(iv, cipher), tag), key).IsNone());
+    ImportSecretKey(key);
+
+    ASSERT_TRUE(DecryptBlob(Concat(Concat(iv, cipher), tag)).IsNone());
 
     EXPECT_EQ(ReadBytes(mDecryptedPath), plain);
-}
-
-TEST_F(BlobDecryptorRoundTripTest, BlobHasIVCiphertextTagLayout)
-{
-    const auto plain = Pattern(100, 22);
-
-    Bytes blob;
-
-    ASSERT_NO_FATAL_FAILURE(Encrypt(Pattern(32, 23), Pattern(cIVLen, 24), plain, blob));
-
-    // GCM doesn't pad: IV + as many ciphertext bytes as plaintext + tag
-    EXPECT_EQ(blob.size(), cIVLen + plain.size() + cTagLen);
-    EXPECT_EQ(Bytes(blob.begin(), blob.begin() + cIVLen), Pattern(cIVLen, 24));
 }
 
 TEST_F(BlobDecryptorRoundTripTest, WrongKeyIsRejectedAndLeavesNoOutput)
@@ -475,18 +388,22 @@ TEST_F(BlobDecryptorRoundTripTest, WrongKeyIsRejectedAndLeavesNoOutput)
     const auto key   = Pattern(32, 30);
     const auto plain = Pattern(1000, 33);
 
+    ImportSecretKey(Pattern(32, 31));
+
     Bytes blob;
 
     ASSERT_NO_FATAL_FAILURE(Encrypt(key, Pattern(cIVLen, 32), plain, blob));
 
-    EXPECT_FALSE(DecryptBlob(blob, Pattern(32, 31)).IsNone());
+    EXPECT_FALSE(DecryptBlob(blob).IsNone());
     EXPECT_FALSE(std::filesystem::exists(mDecryptedPath));
 }
 
 TEST_F(BlobDecryptorRoundTripTest, ModifiedBlobIsRejectedAndLeavesNoOutput)
 {
     const auto key   = Pattern(32, 40);
-    const auto plain = Pattern(3 * cFileChunkSize + 5, 42);
+    const auto plain = Pattern(1000, 42);
+
+    ImportSecretKey(key);
 
     Bytes blob;
 
@@ -516,26 +433,31 @@ TEST_F(BlobDecryptorRoundTripTest, ModifiedBlobIsRejectedAndLeavesNoOutput)
 
         std::filesystem::remove(mDecryptedPath);
 
-        EXPECT_FALSE(DecryptBlob(modified, key).IsNone());
+        EXPECT_FALSE(DecryptBlob(modified).IsNone());
         EXPECT_FALSE(std::filesystem::exists(mDecryptedPath)) << "unauthenticated plaintext was left behind";
     }
 }
 
 TEST_F(BlobDecryptorRoundTripTest, BlobWithoutRoomForTagIsRejected)
 {
+    ImportSecretKey(Pattern(32, 52));
+
     // IV followed by fewer bytes than an authentication tag
-    EXPECT_FALSE(DecryptBlob(Concat(Pattern(cIVLen, 50), Pattern(cTagLen - 1, 51)), Pattern(32, 52)).IsNone());
+    EXPECT_FALSE(DecryptBlob(Concat(Pattern(cIVLen, 50), Pattern(cTagLen - 1, 51))).IsNone());
     EXPECT_FALSE(std::filesystem::exists(mDecryptedPath));
 }
 
-TEST_F(BlobDecryptorRoundTripTest, KeyOfWrongSizeIsRejected)
+TEST_F(BlobDecryptorRoundTripTest, BlobHasIVCiphertextTagLayout)
 {
+    const auto plain = Pattern(100, 22);
+
     Bytes blob;
 
-    ASSERT_NO_FATAL_FAILURE(Encrypt(Pattern(32, 60), Pattern(cIVLen, 61), Pattern(100, 62), blob));
+    ASSERT_NO_FATAL_FAILURE(Encrypt(Pattern(32, 23), Pattern(cIVLen, 24), plain, blob));
 
-    // AES256 needs exactly 32 bytes
-    EXPECT_FALSE(DecryptBlob(blob, Pattern(16, 60)).IsNone());
+    // GCM doesn't pad: IV + as many ciphertext bytes as plaintext + tag
+    EXPECT_EQ(blob.size(), cIVLen + plain.size() + cTagLen);
+    EXPECT_EQ(Bytes(blob.begin(), blob.begin() + cIVLen), Pattern(cIVLen, 24));
 }
 
 } // namespace aos::sm::imagemanager
