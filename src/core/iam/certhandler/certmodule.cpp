@@ -56,6 +56,15 @@ Error CertModule::GetCertificate(const Array<uint8_t>& issuer, const Array<uint8
         return AOS_ERROR_WRAP(ErrorEnum::eNoMemory);
     }
 
+    if (GetCertType() == "itemencryption") {
+        resCert.mCertType = GetCertType();
+        resCert.mKeyURL
+            = "pkcs11:token=aoscore;object=itemencryption;id=%4F%A0%57%A6%0C%C3%E0%C0%DC%77%18%E9%49%0D%A4%58?module-"
+              "path=/usr/lib/softhsm/libsofthsm2.so&pin-source=/var/aos/iam/.usrpin";
+
+        return ErrorEnum::eNone;
+    }
+
     if (serial.IsEmpty()) {
         auto err = mStorage->GetCertsInfo(GetCertType(), *certsInStorage);
         if (!err.IsNone()) {
