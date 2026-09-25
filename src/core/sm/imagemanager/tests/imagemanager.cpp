@@ -19,6 +19,7 @@
 
 #include <core/sm/imagemanager/imagemanager.hpp>
 
+#include "mocks/blobdecryptormock.hpp"
 #include "mocks/blobinfoprovidermock.hpp"
 #include "mocks/imagehandlermock.hpp"
 #include "stubs/storagestub.hpp"
@@ -177,7 +178,7 @@ protected:
         Config config {cTestImagePath, 0, cUpdateItemTTL, cRemoveOutdatedPeriod};
 
         auto err = mImageManager.Init(mAllocator, config, mBlobInfoProviderMock, mSpaceAllocatorMock, mDownloaderMock,
-            mFileInfoProviderMock, mOCISpecMock, mImageHandlerMock, mStorageStub);
+            mFileInfoProviderMock, mOCISpecMock, mImageHandlerMock, mStorageStub, mBlobDecryptorMock);
         EXPECT_TRUE(err.IsNone()) << "Failed to initialize image manager: " << tests::utils::ErrorToStr(err);
 
         EXPECT_CALL(mBlobInfoProviderMock, GetBlobsInfo(_, _))
@@ -230,6 +231,7 @@ protected:
     NiceMock<oci::OCISpecMock>                   mOCISpecMock;
     NiceMock<ImageHandlerMock>                   mImageHandlerMock;
     StorageStub                                  mStorageStub;
+    NiceMock<BlobDecryptorMock>                  mBlobDecryptorMock;
 };
 
 /***********************************************************************************************************************
@@ -361,6 +363,152 @@ TEST_F(ImageManagerTest, InstallService)
 
     auto unpackedLayerSizeStr = ReadFileToString(fs::JoinPath(GetLayerPath(cDiffDigest), "size").CStr());
     EXPECT_EQ(std::stoull(unpackedLayerSizeStr), cUnpackedLayerSize);
+}
+
+TEST_F(ImageManagerTest, InstallServiceWithEncryptedLayer)
+{
+    // Input data
+
+    constexpr auto cManifestDigest      = "sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef";
+    constexpr auto cImageConfigDigest   = "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a";
+    constexpr auto cItemConfigDigest    = "sha256:abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890";
+    constexpr auto cLayerDigest         = "sha256:4a6f6b8f5f5e3e7b9c4d3e2f1a0b9c8d7e6f5e4d3c2b1a0f9e8d7c6b5a4b3c2b";
+    constexpr auto cDiffDigest          = "sha256:0f9e8d7c6b5a4b3c2b1a0b9c8d7e6f5e4d3c2b1a0f9e8d7c6b5a4b3c2b1a0f9e";
+    constexpr auto cUnpackedLayerDigest = "sha256:9e8d7c6b5a4b3c2b1a0b9c8d7e6f5e4d3c2b1a0f9e8d7c6b5a4b3c2b1a0f9e8d";
+    constexpr auto cUnpackedLayerSize   = 2048;
+
+    UpdateItemInfo itemInfo {"service1", UpdateItemTypeEnum::eService, "1.0.0", cManifestDigest};
+
+    auto manifestPath      = GetBlobPath(cManifestDigest);
+    auto imageConfigPath   = GetBlobPath(cImageConfigDigest);
+    auto itemConfigPath    = GetBlobPath(cItemConfigDigest);
+    auto layerBlobPath     = GetBlobPath(cLayerDigest);
+    auto layerUnpackedPath = fs::JoinPath(GetLayerPath(cDiffDigest), "layer");
+
+    auto imageManifest = std::make_unique<oci::ImageManifest>();
+
+    imageManifest->mConfig.mMediaType = "application/vnd.oci.image.config.v1+json";
+    imageManifest->mConfig.mDigest    = cImageConfigDigest;
+    imageManifest->mConfig.mSize      = 512;
+    imageManifest->mItemConfig.EmplaceValue(
+        oci::ContentDescriptor {"application/vnd.aos.item.config.v1+json", cItemConfigDigest, 256});
+    imageManifest->mLayers.EmplaceBack(
+        oci::ContentDescriptor {oci::cMediaTypeLayerTarGZipEncrypted, cLayerDigest, 1024});
+
+    auto imageConfig = std::make_unique<oci::ImageConfig>();
+
+    imageConfig->mRootfs.mDiffIDs.EmplaceBack(cDiffDigest);
+
+    // Expected calls
+
+    EXPECT_CALL(mDownloaderMock, Download(String(cManifestDigest), _, manifestPath)).Times(1);
+    EXPECT_CALL(mDownloaderMock, Download(String(cItemConfigDigest), _, itemConfigPath)).Times(1);
+    EXPECT_CALL(mDownloaderMock, Download(String(cImageConfigDigest), _, imageConfigPath)).Times(1);
+    EXPECT_CALL(mDownloaderMock, Download(String(cLayerDigest), _, layerBlobPath)).Times(1);
+    EXPECT_CALL(mFileInfoProviderMock, GetFileInfo(_, _, _))
+        .WillOnce(DoAll(SetArgReferee<1>(GetFileInfoByDigest(cManifestDigest)), Return(ErrorEnum::eNone)))
+        .WillOnce(DoAll(SetArgReferee<1>(GetFileInfoByDigest(cItemConfigDigest)), Return(ErrorEnum::eNone)))
+        .WillOnce(DoAll(SetArgReferee<1>(GetFileInfoByDigest(cImageConfigDigest)), Return(ErrorEnum::eNone)))
+        .WillOnce(DoAll(SetArgReferee<1>(GetFileInfoByDigest(cLayerDigest)), Return(ErrorEnum::eNone)));
+    EXPECT_CALL(mOCISpecMock, LoadImageManifest(manifestPath, _))
+        .WillOnce(DoAll(SetArgReferee<1>(*imageManifest), Return(ErrorEnum::eNone)));
+    EXPECT_CALL(mOCISpecMock, LoadImageConfig(imageConfigPath, _))
+        .WillOnce(DoAll(SetArgReferee<1>(*imageConfig), Return(ErrorEnum::eNone)));
+
+    // The layer blob is encrypted (media type cMediaTypeLayerTarGZipEncrypted): ImageManager must decrypt it,
+    // in place, via BlobDecryptorItf before unpacking it as a plain gzip'd tar.
+    EXPECT_CALL(mBlobDecryptorMock, Decrypt(layerBlobPath, _))
+        .WillOnce(Invoke([](const String& encryptedPath, const String& decryptedPath) -> Error {
+            (void)encryptedPath;
+
+            CreateFile(decryptedPath.CStr(), "decrypted layer content");
+
+            return ErrorEnum::eNone;
+        }));
+    EXPECT_CALL(mImageHandlerMock, GetUnpackedLayerSize(layerBlobPath, String(oci::cMediaTypeLayerTarGZip)))
+        .WillOnce(Return(cUnpackedLayerSize));
+    EXPECT_CALL(mImageHandlerMock, UnpackLayer(layerBlobPath, layerUnpackedPath, String(oci::cMediaTypeLayerTarGZip)))
+        .Times(1);
+    EXPECT_CALL(mImageHandlerMock, GetUnpackedLayerDigest(layerUnpackedPath))
+        .WillOnce(Return(StaticString<oci::cDigestLen>(cUnpackedLayerDigest)));
+
+    // Install update item
+
+    auto err = mImageManager.InstallUpdateItem(itemInfo);
+    EXPECT_TRUE(err.IsNone()) << "Failed to install update item: " << tests::utils::ErrorToStr(err);
+
+    // Check metadata
+
+    auto diffLayerDigest = ReadFileToString(GetBlobPath(cLayerDigest).CStr());
+    EXPECT_EQ(diffLayerDigest, cDiffDigest);
+
+    auto unpackedLayerDigest = ReadFileToString(fs::JoinPath(GetLayerPath(cDiffDigest), "digest").CStr());
+    EXPECT_EQ(unpackedLayerDigest, cUnpackedLayerDigest);
+}
+
+TEST_F(ImageManagerTest, InstallServiceEncryptedLayerDecryptFailureLeavesNoDecryptedFile)
+{
+    // Input data
+
+    constexpr auto cManifestDigest    = "sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef";
+    constexpr auto cImageConfigDigest = "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a";
+    constexpr auto cItemConfigDigest  = "sha256:abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890";
+    constexpr auto cLayerDigest       = "sha256:4a6f6b8f5f5e3e7b9c4d3e2f1a0b9c8d7e6f5e4d3c2b1a0f9e8d7c6b5a4b3c2b";
+    constexpr auto cDiffDigest        = "sha256:0f9e8d7c6b5a4b3c2b1a0b9c8d7e6f5e4d3c2b1a0f9e8d7c6b5a4b3c2b1a0f9e";
+
+    UpdateItemInfo itemInfo {"service1", UpdateItemTypeEnum::eService, "1.0.0", cManifestDigest};
+
+    auto manifestPath    = GetBlobPath(cManifestDigest);
+    auto imageConfigPath = GetBlobPath(cImageConfigDigest);
+    auto itemConfigPath  = GetBlobPath(cItemConfigDigest);
+    auto layerBlobPath   = GetBlobPath(cLayerDigest);
+
+    auto imageManifest = std::make_unique<oci::ImageManifest>();
+
+    imageManifest->mConfig.mMediaType = "application/vnd.oci.image.config.v1+json";
+    imageManifest->mConfig.mDigest    = cImageConfigDigest;
+    imageManifest->mConfig.mSize      = 512;
+    imageManifest->mItemConfig.EmplaceValue(
+        oci::ContentDescriptor {"application/vnd.aos.item.config.v1+json", cItemConfigDigest, 256});
+    imageManifest->mLayers.EmplaceBack(
+        oci::ContentDescriptor {oci::cMediaTypeLayerTarGZipEncrypted, cLayerDigest, 1024});
+
+    auto imageConfig = std::make_unique<oci::ImageConfig>();
+
+    imageConfig->mRootfs.mDiffIDs.EmplaceBack(cDiffDigest);
+
+    // Expected calls
+
+    EXPECT_CALL(mDownloaderMock, Download(String(cManifestDigest), _, manifestPath)).Times(1);
+    EXPECT_CALL(mDownloaderMock, Download(String(cItemConfigDigest), _, itemConfigPath)).Times(1);
+    EXPECT_CALL(mDownloaderMock, Download(String(cImageConfigDigest), _, imageConfigPath)).Times(1);
+    EXPECT_CALL(mDownloaderMock, Download(String(cLayerDigest), _, layerBlobPath)).Times(1);
+    EXPECT_CALL(mFileInfoProviderMock, GetFileInfo(_, _, _))
+        .WillOnce(DoAll(SetArgReferee<1>(GetFileInfoByDigest(cManifestDigest)), Return(ErrorEnum::eNone)))
+        .WillOnce(DoAll(SetArgReferee<1>(GetFileInfoByDigest(cItemConfigDigest)), Return(ErrorEnum::eNone)))
+        .WillOnce(DoAll(SetArgReferee<1>(GetFileInfoByDigest(cImageConfigDigest)), Return(ErrorEnum::eNone)))
+        .WillOnce(DoAll(SetArgReferee<1>(GetFileInfoByDigest(cLayerDigest)), Return(ErrorEnum::eNone)));
+    EXPECT_CALL(mOCISpecMock, LoadImageManifest(manifestPath, _))
+        .WillOnce(DoAll(SetArgReferee<1>(*imageManifest), Return(ErrorEnum::eNone)));
+    EXPECT_CALL(mOCISpecMock, LoadImageConfig(imageConfigPath, _))
+        .WillOnce(DoAll(SetArgReferee<1>(*imageConfig), Return(ErrorEnum::eNone)));
+
+    // Wrong key or a modified/truncated blob: BlobDecryptorItf fails and leaves no output, so ImageManager must
+    // not try to unpack anything, and the auth-failure error must propagate.
+    EXPECT_CALL(mBlobDecryptorMock, Decrypt(layerBlobPath, _)).WillOnce(Return(ErrorEnum::eFailed));
+    EXPECT_CALL(mImageHandlerMock, GetUnpackedLayerSize(_, _)).Times(0);
+    EXPECT_CALL(mImageHandlerMock, UnpackLayer(_, _, _)).Times(0);
+
+    // Install update item
+
+    auto err = mImageManager.InstallUpdateItem(itemInfo);
+    EXPECT_FALSE(err.IsNone());
+
+    // No decrypted (or partially decrypted) file was left behind next to the still-encrypted blob.
+
+    StaticString<cFilePathLen> decryptedPath;
+    ASSERT_TRUE(decryptedPath.Format("%s.dec", layerBlobPath.CStr()).IsNone());
+    EXPECT_FALSE(std::filesystem::exists(decryptedPath.CStr()));
 }
 
 TEST_F(ImageManagerTest, GetLayerPath)

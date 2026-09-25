@@ -57,7 +57,7 @@ Error AddPathIfNotExist(Array<StaticString<cFilePathLen>>& list, const String& p
 Error ImageManager::Init(AllocatorItf& allocator, const Config& config, BlobInfoProviderItf& blobInfoProvider,
     spaceallocator::SpaceAllocatorItf& spaceAllocator, downloader::DownloaderItf& downloader,
     fs::FileInfoProviderItf& fileInfoProvider, oci::OCISpecItf& ociSpec, ImageHandlerItf& imageHandler,
-    StorageItf& storage)
+    StorageItf& storage, BlobDecryptorItf& blobDecryptor)
 {
     LOG_DBG() << "Init image manager";
 
@@ -70,6 +70,7 @@ Error ImageManager::Init(AllocatorItf& allocator, const Config& config, BlobInfo
     mOCISpec          = &ociSpec;
     mImageHandler     = &imageHandler;
     mStorage          = &storage;
+    mBlobDecryptor    = &blobDecryptor;
 
     LOG_DBG() << "Config" << Log::Field("imagePath", mConfig.mImagePath) << Log::Field("partLimit", mConfig.mPartLimit)
               << Log::Field("updateItemTTL", mConfig.mUpdateItemTTL)
@@ -666,6 +667,29 @@ Error ImageManager::UnpackLayer(const String& path, const oci::ContentDescriptor
     return ErrorEnum::eNone;
 }
 
+Error ImageManager::DecryptBlob(const String& path, const String& diffDigest)
+{
+    LOG_DBG() << "Decrypt blob" << Log::Field("path", path) << Log::Field("diffDigest", diffDigest);
+
+    StaticString<cFilePathLen> decryptedPath;
+
+    if (auto err = decryptedPath.Format("%s.dec", path.CStr()); !err.IsNone()) {
+        return AOS_ERROR_WRAP(err);
+    }
+
+    if (auto err = mBlobDecryptor->Decrypt(path, decryptedPath); !err.IsNone()) {
+        return err;
+    }
+
+    auto cleanUpDecrypted = DeferRelease(&decryptedPath, [](const auto* path) { (void)fs::Remove(*path); });
+
+    if (auto err = fs::Rename(decryptedPath, path); !err.IsNone()) {
+        return AOS_ERROR_WRAP(err);
+    }
+
+    return ErrorEnum::eNone;
+}
+
 Error ImageManager::InstallLayer(
     const oci::ContentDescriptor& descriptor, const String& diffDigest, InstallItem& installItem)
 {
@@ -721,7 +745,25 @@ Error ImageManager::InstallLayer(
         return err;
     }
 
-    if (err = UnpackLayer(path, descriptor, diffDigest); !err.IsNone()) {
+    LOG_DBG() << "Layer descriptor" << Log::Field("mediaType", descriptor.mMediaType)
+              << Log::Field("digest", descriptor.mDigest);
+
+    auto unpackDescriptor = descriptor;
+
+    if (unpackDescriptor.mMediaType == oci::cMediaTypeLayerTarGZipEncrypted) {
+        err = DecryptBlob(path, diffDigest);
+        if (!err.IsNone()) {
+            return err;
+        }
+
+        err = unpackDescriptor.mMediaType.Assign(oci::cMediaTypeLayerTarGZip);
+        if (!err.IsNone()) {
+            return AOS_ERROR_WRAP(err);
+        }
+    }
+
+    err = UnpackLayer(path, unpackDescriptor, diffDigest);
+    if (!err.IsNone()) {
         return err;
     }
 
