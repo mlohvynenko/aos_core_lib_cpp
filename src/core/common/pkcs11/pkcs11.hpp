@@ -445,6 +445,27 @@ public:
         CK_MECHANISM_PTR mechanism, ObjectHandle privKey, const Array<uint8_t>& data, Array<uint8_t>& result) const;
 
     /**
+     * Decrypts data supplied incrementally by chunkProvider using a multi-part PKCS11 operation, so
+     * the whole ciphertext never needs to be held in memory at once. Whatever plaintext each
+     * C_DecryptUpdate/C_DecryptFinal call releases is appended to result as it comes back; many
+     * PKCS11 modules (SoftHSM2 included, verified empirically against CKM_AES_GCM) only release
+     * AEAD-decrypted data once the tag has been checked, at C_DecryptFinal, all at once - so result
+     * must have capacity for the whole plaintext regardless of how input was chunked.
+     *
+     * @param mechanism mechanism used to decrypt.
+     * @param privKey the handle of the private/secret key.
+     * @param chunkProvider supplies ciphertext chunks (and owns their storage).
+     * @param[out] result decrypted data.
+     * @return Error. If the very first C_DecryptUpdate call fails (nothing decrypted yet), this
+     * returns ErrorEnum::eNotSupported: some PKCS11 modules don't support multi-part operations for
+     * AEAD mechanisms at all, and only fail once actual data is pushed through, not at
+     * C_DecryptInit. The caller can safely retry via a fresh, single-shot Decrypt() instead. A
+     * failure after that point is a real error (e.g. a bad tag), not a capability gap.
+     */
+    Error DecryptMultiPart(CK_MECHANISM_PTR mechanism, ObjectHandle privKey, crypto::ChunkProviderItf& chunkProvider,
+        Array<uint8_t>& result) const;
+
+    /**
      * Returns session handle.
      *
      * @return session handle.
@@ -469,6 +490,8 @@ private:
 
     Error DecryptInit(CK_MECHANISM_PTR mechanism, ObjectHandle privKey) const;
     Error Decrypt(const Array<uint8_t>& data, CK_BYTE_PTR result, CK_ULONG_PTR resultSize) const;
+    Error DecryptUpdate(const Array<uint8_t>& data, CK_BYTE_PTR result, CK_ULONG_PTR resultSize) const;
+    Error DecryptFinal(CK_BYTE_PTR result, CK_ULONG_PTR resultSize) const;
 
     Error FindObjectsInit(const Array<ObjectAttribute>& templ) const;
     Error FindObjects(Array<ObjectHandle>& objects) const;
@@ -745,7 +768,10 @@ public:
         const Array<uint8_t>& id, const String& label, EllipticCurve curve);
 
     /**
-     * Retrieves a previously created asymmetric key pair.
+     * Retrieves a previously created key by id/label: an asymmetric (RSA/ECDSA) key pair, or a CKO_SECRET_KEY
+     * (AES) object wrapped as an aos::crypto::PrivateKeyItf whose GetPublic/Sign are simply not supported
+     * (AESPrivateKey), so callers that only need PrivateKeyItf::Decrypt don't need to know which one they got.
+     * The returned PrivateKey's pub handle is 0 for the AES case.
      *
      * @param id key id.
      * @param label key label.

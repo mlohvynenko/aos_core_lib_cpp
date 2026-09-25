@@ -769,6 +769,71 @@ Error SessionContext::Decrypt(
     return result.Resize(resultSize);
 }
 
+Error SessionContext::DecryptMultiPart(CK_MECHANISM_PTR mechanism, ObjectHandle privKey,
+    crypto::ChunkProviderItf& chunkProvider, Array<uint8_t>& result) const
+{
+    LockGuard lock {mMutex};
+
+    if (auto err = DecryptInit(mechanism, privKey); !err.IsNone()) {
+        return err;
+    }
+
+    // Grow to full capacity up front: Array::Resize zero-fills newly exposed elements when growing, which
+    // would clobber the raw C_DecryptUpdate/C_DecryptFinal writes below if they landed before a later
+    // resize-up. Writing into an already-full-size buffer and only ever shrinking afterward (which doesn't
+    // zero anything) avoids that, matching the single-shot Decrypt() above.
+    if (auto err = result.Resize(result.MaxSize()); !err.IsNone()) {
+        return AOS_ERROR_WRAP(err);
+    }
+
+    size_t written           = 0;
+    bool   anyChunkDecrypted = false;
+
+    while (true) {
+        auto [chunk, err] = chunkProvider.NextChunk();
+        if (err.Is(ErrorEnum::eEOF)) {
+            break;
+        }
+
+        if (!err.IsNone()) {
+            return err;
+        }
+
+        CK_ULONG outSize = result.MaxSize() - written;
+
+        err = DecryptUpdate(chunk, result.Get() + written, &outSize);
+        if (!err.IsNone()) {
+            // Some PKCS11 modules don't support multi-part operations for AEAD mechanisms like
+            // CKM_AES_GCM at all: they only fail once actual data is pushed through
+            // C_DecryptUpdate, not at C_DecryptInit. Nothing has been consumed from chunkProvider
+            // except this one chunk, so if it's the very first, the caller can safely retry via a
+            // fresh, single-shot decrypt instead.
+            if (!anyChunkDecrypted) {
+                return AOS_ERROR_WRAP(ErrorEnum::eNotSupported);
+            }
+
+            return err;
+        }
+
+        anyChunkDecrypted = true;
+        written += outSize;
+    }
+
+    CK_ULONG finalSize = result.MaxSize() - written;
+
+    if (auto err = DecryptFinal(result.Get() + written, &finalSize); !err.IsNone()) {
+        if (!anyChunkDecrypted) {
+            return AOS_ERROR_WRAP(ErrorEnum::eNotSupported);
+        }
+
+        return err;
+    }
+
+    written += finalSize;
+
+    return result.Resize(written);
+}
+
 SessionHandle SessionContext::GetHandle() const
 {
     LockGuard lock {mMutex};
@@ -846,6 +911,35 @@ Error SessionContext::Decrypt(const Array<uint8_t>& data, CK_BYTE_PTR result, CK
     }
 
     CK_RV rv = mFunctionList->C_Decrypt(mHandle, const_cast<uint8_t*>(data.Get()), data.Size(), result, resultSize);
+    if (rv != CKR_OK) {
+        return static_cast<int32_t>(rv);
+    }
+
+    return ErrorEnum::eNone;
+}
+
+Error SessionContext::DecryptUpdate(const Array<uint8_t>& data, CK_BYTE_PTR result, CK_ULONG_PTR resultSize) const
+{
+    if (!mFunctionList || !mFunctionList->C_DecryptUpdate) {
+        return ErrorEnum::eWrongState;
+    }
+
+    CK_RV rv
+        = mFunctionList->C_DecryptUpdate(mHandle, const_cast<uint8_t*>(data.Get()), data.Size(), result, resultSize);
+    if (rv != CKR_OK) {
+        return static_cast<int32_t>(rv);
+    }
+
+    return ErrorEnum::eNone;
+}
+
+Error SessionContext::DecryptFinal(CK_BYTE_PTR result, CK_ULONG_PTR resultSize) const
+{
+    if (!mFunctionList || !mFunctionList->C_DecryptFinal) {
+        return ErrorEnum::eWrongState;
+    }
+
+    CK_RV rv = mFunctionList->C_DecryptFinal(mHandle, result, resultSize);
     if (rv != CKR_OK) {
         return static_cast<int32_t>(rv);
     }
@@ -1170,6 +1264,38 @@ RetWithError<PrivateKey> Utils::FindPrivateKey(const Array<uint8_t>& id, const S
 
     LOG_DBG() << "Find private key: id=" << idStr << ", label=" << label;
 
+    // A symmetric AES key has no public part, so it never matches the CKO_PRIVATE_KEY/CKO_PUBLIC_KEY pairing
+    // search below; try it first as a CKO_SECRET_KEY object with the same id/label.
+    CK_OBJECT_CLASS secretKeyClass = CKO_SECRET_KEY;
+    CK_KEY_TYPE     keyTypeAES     = CKK_AES;
+
+    StaticArray<ObjectAttribute, cObjectAttributesCount> secretKeyTempl;
+
+    (void)secretKeyTempl.PushBack({CKA_CLASS, ConvertToAttributeValue(secretKeyClass)});
+    (void)secretKeyTempl.PushBack({CKA_KEY_TYPE, ConvertToAttributeValue(keyTypeAES)});
+    (void)secretKeyTempl.PushBack({CKA_ID, id});
+    (void)secretKeyTempl.PushBack({CKA_LABEL, ConvertToAttributeValue(label)});
+
+    StaticArray<ObjectHandle, cKeysPerToken> secretKeys;
+
+    // SessionContext::FindObjects itself returns eNotFound (not just an empty result) when nothing matches:
+    // that's the expected, common case here (most keys are RSA/ECDSA), not a real failure, so it must not
+    // short-circuit the CKO_PRIVATE_KEY/CKO_PUBLIC_KEY search below.
+    if (auto err = mSession->FindObjects(secretKeyTempl, secretKeys); !err.IsNone() && !err.Is(ErrorEnum::eNotFound)) {
+        return {{}, AOS_ERROR_WRAP(err)};
+    }
+
+    if (!secretKeys.IsEmpty()) {
+        // even after pinning class/key type/id/label, a collision between two such objects is still possible
+        // and would silently pick an arbitrary one; treat that as an error instead of guessing.
+        if (secretKeys.Size() > 1) {
+            return {
+                {}, AOS_ERROR_WRAP(Error(ErrorEnum::eInvalidArgument, "id/label matches more than one secret key"))};
+        }
+
+        return ExportPrivateKey(secretKeys[0], 0, keyTypeAES);
+    }
+
     constexpr auto cSingleAttribute = 1;
 
     CK_OBJECT_CLASS privKeyClass = CKO_PRIVATE_KEY;
@@ -1422,6 +1548,16 @@ RetWithError<PrivateKey> Utils::ExportPrivateKey(
     ObjectHandle privKeyHandle, ObjectHandle pubKeyHandle, CK_KEY_TYPE keyType)
 {
     switch (keyType) {
+    case CKK_AES: {
+        // no public part to look up: pubKeyHandle is unused (0) for a symmetric key.
+        auto cryptoKey = MakeShared<AESPrivateKey>(&mAllocator, mSession, privKeyHandle);
+        if (!cryptoKey) {
+            return {{}, AOS_ERROR_WRAP(ErrorEnum::eNoMemory)};
+        }
+
+        return {PrivateKey {privKeyHandle, 0, cryptoKey}, ErrorEnum::eNone};
+    }
+
     case CKK_RSA: {
         StaticArray<Array<uint8_t>, cObjectAttributesCount> attrValues;
         StaticArray<AttributeType, cObjectAttributesCount>  attrTypes;

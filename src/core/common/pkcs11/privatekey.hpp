@@ -104,6 +104,13 @@ public:
      */
     RetWithError<CK_MECHANISM> Visit(const crypto::OAEPDecryptionOptions& options) const;
 
+    /**
+     * Rejects a GCM option: not applicable to an RSA key.
+     *
+     * @return RetWithError<CK_MECHANISM>.
+     */
+    RetWithError<CK_MECHANISM> Visit(const crypto::GCMDecryptionOptions& options) const;
+
 private:
     mutable CK_RSA_PKCS_OAEP_PARAMS mOAEPParams = {};
 };
@@ -167,6 +174,117 @@ private:
     crypto::x509::ProviderItf& mCryptoProvider;
     ObjectHandle               mPrivKeyHandle;
     crypto::ECDSAPublicKey     mPublicKey;
+};
+
+/**
+ * Converter for mechanism options of AES-GCM decryption.
+ */
+struct PKCS11AESMechConverter : public StaticVisitor<RetWithError<CK_MECHANISM>> {
+public:
+    /**
+     * Rejects a PKCS1v15 option: not applicable to a symmetric key.
+     *
+     * @return RetWithError<CK_MECHANISM>.
+     */
+    RetWithError<CK_MECHANISM> Visit(const crypto::PKCS1v15DecryptionOptions& options) const;
+
+    /**
+     * Rejects an OAEP option: not applicable to a symmetric key.
+     *
+     * @return RetWithError<CK_MECHANISM>.
+     */
+    RetWithError<CK_MECHANISM> Visit(const crypto::OAEPDecryptionOptions& options) const;
+
+    /**
+     * Converts GCM decryption options to a CKM_AES_GCM mechanism.
+     *
+     * @param options GCM decrypt options (IV).
+     * @return RetWithError<CK_MECHANISM>.
+     */
+    RetWithError<CK_MECHANISM> Visit(const crypto::GCMDecryptionOptions& options) const;
+
+private:
+    mutable CK_GCM_PARAMS mGCMParams = {};
+};
+
+/**
+ * A PKCS11 CKO_SECRET_KEY (AES) object that decrypts without ever reading the key's own value: the raw key
+ * bytes never leave the token. Implements crypto::PrivateKeyItf so it can be loaded and handled the same way
+ * as an RSA/ECDSA private key (see pkcs11::Utils::FindPrivateKey); a symmetric key has no public part or
+ * signing capability, so GetPublic/Sign simply don't apply and Decrypt only accepts GCMDecryptionOptions.
+ */
+class AESPrivateKey : public crypto::PrivateKeyItf {
+public:
+    /**
+     * Constructs object instance.
+     *
+     * @param session session context.
+     * @param keyHandle secret key handle.
+     */
+    AESPrivateKey(const SharedPtr<SessionContext>& session, ObjectHandle keyHandle);
+
+    /**
+     * A symmetric key has no public part. Returns a placeholder that must never be meaningfully used: nothing
+     * that knows this is a symmetric key has a reason to call this.
+     *
+     * @return const crypto::PublicKeyItf&.
+     */
+    const crypto::PublicKeyItf& GetPublic() const override;
+
+    /**
+     * Not supported: a symmetric key does not sign.
+     *
+     * @return Error always ErrorEnum::eNotSupported.
+     */
+    Error Sign(
+        const Array<uint8_t>& digest, const crypto::SignOptions& options, Array<uint8_t>& signature) const override;
+
+    /**
+     * Decrypts an AES-256-GCM encrypted message using this key on the token. options must hold
+     * GCMDecryptionOptions (the IV); cipher is the ciphertext followed by the 16-byte authentication tag, as
+     * produced by a typical AEAD API. Returns ErrorEnum::eNotSupported for any other DecryptionOptions kind.
+     *
+     * @param cipher ciphertext followed by the authentication tag.
+     * @param options decryption options; must hold GCMDecryptionOptions.
+     * @param[out] result decoded message.
+     * @return Error.
+     */
+    Error Decrypt(
+        const Array<uint8_t>& cipher, const crypto::DecryptionOptions& options, Array<uint8_t>& result) const override;
+
+    /**
+     * Same as Decrypt, but reads the ciphertext incrementally from chunkProvider via a multi-part
+     * PKCS11 operation instead of requiring it all in memory up front (see
+     * SessionContext::DecryptMultiPart). result must still have capacity for the whole plaintext:
+     * most PKCS11 modules, including SoftHSM2, only release AEAD-decrypted data once the
+     * authentication tag has been verified, all at once, at the very end.
+     *
+     * @param chunkProvider supplies the cipher message in chunks.
+     * @param options decryption options; must hold GCMDecryptionOptions.
+     * @param[out] result decoded message.
+     * @return Error. ErrorEnum::eNotSupported if this token doesn't support multi-part CKM_AES_GCM
+     * decrypt operations at all: retry via Decrypt() instead.
+     */
+    Error StreamDecrypt(crypto::ChunkProviderItf& chunkProvider, const crypto::DecryptionOptions& options,
+        Array<uint8_t>& result) const override;
+
+private:
+    // Only exists to satisfy PrivateKeyItf::GetPublic's reference-returning signature for a key type that
+    // has no public part; GetKeyType/IsEqual are never meaningfully called on it.
+    class NoPublicKey : public crypto::PublicKeyItf {
+    public:
+        crypto::KeyType GetKeyType() const override { return crypto::KeyType {}; }
+        bool            IsEqual(const crypto::PublicKeyItf& pubKey) const override
+        {
+            (void)pubKey;
+
+            return false;
+        }
+    };
+
+    SharedPtr<SessionContext> mSession;
+    ObjectHandle              mKeyHandle;
+    NoPublicKey               mNoPublicKey;
 };
 
 } // namespace aos::pkcs11

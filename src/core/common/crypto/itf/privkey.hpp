@@ -8,10 +8,12 @@
 #define AOS_CORE_COMMON_CRYPTO_ITF_PRIVKEY_HPP_
 
 #include <core/common/config.hpp>
+#include <core/common/tools/array.hpp>
 #include <core/common/tools/enum.hpp>
 #include <core/common/tools/string.hpp>
 #include <core/common/tools/variant.hpp>
 
+#include "aes.hpp"
 #include "hash.hpp"
 
 namespace aos::crypto {
@@ -78,9 +80,45 @@ struct OAEPDecryptionOptions {
 };
 
 /**
+ * AES-GCM decryption options.
+ */
+struct GCMDecryptionOptions {
+    /**
+     * GCM initialization vector (nonce): AESCipherItf::cGCMIVSize (12) bytes.
+     */
+    StaticArray<uint8_t, AESCipherItf::cGCMIVSize> mIV;
+};
+
+/**
  * Decryption options.
  */
-using DecryptionOptions = Variant<PKCS1v15DecryptionOptions, OAEPDecryptionOptions>;
+using DecryptionOptions = Variant<PKCS1v15DecryptionOptions, OAEPDecryptionOptions, GCMDecryptionOptions>;
+
+/**
+ * Supplies data chunks on demand to a streaming operation (see PrivateKeyItf::StreamDecrypt), so the
+ * whole input never needs to be held in memory at once. The provider owns the chunk buffer itself (sized
+ * and allocated however its own implementation sees fit) rather than requiring the caller to supply one:
+ * on a stack-constrained target, a caller-supplied buffer sized for a whole chunk (tens of KiB) can blow a
+ * function's stack budget, whereas a concrete provider (e.g. one backed by a file) can size its buffer via
+ * whatever AllocatorItf it already has.
+ */
+class ChunkProviderItf {
+public:
+    /**
+     * Returns the next chunk of data. The returned array is only valid until the next call to
+     * NextChunk or until this provider is destroyed - callers must consume it before calling again.
+     *
+     * @return RetWithError<Array<uint8_t>>. ErrorEnum::eEOF (with an empty array) once no more data
+     * remains; a call that delivers the last chunk returns ErrorEnum::eNone, even if that chunk is
+     * short.
+     */
+    virtual RetWithError<Array<uint8_t>> NextChunk() = 0;
+
+    /**
+     * Destroys object instance.
+     */
+    virtual ~ChunkProviderItf() = default;
+};
 
 /**
  * Public key interface.
@@ -140,6 +178,31 @@ public:
      */
     virtual Error Decrypt(const Array<uint8_t>& cipher, const DecryptionOptions& options, Array<uint8_t>& result) const
         = 0;
+
+    /**
+     * Decrypts a cipher message supplied incrementally by chunkProvider, so the whole ciphertext
+     * doesn't need to be held in memory at once - only whatever chunk size chunkProvider hands back
+     * at a time. This doesn't necessarily bound *output* memory the same way: many PKCS11 tokens
+     * only release AEAD-decrypted data once the authentication tag has been verified, all at once,
+     * at the very end, so result must still have capacity for the whole plaintext regardless of how
+     * the input was chunked (see pkcs11::AESPrivateKey for the concrete behavior). Default
+     * implementation returns ErrorEnum::eNotSupported; only override it where streaming input
+     * actually helps.
+     *
+     * @param chunkProvider supplies the cipher message in chunks.
+     * @param options decryption options.
+     * @param[out] result decoded message.
+     * @return Error.
+     */
+    virtual Error StreamDecrypt(
+        ChunkProviderItf& chunkProvider, const DecryptionOptions& options, Array<uint8_t>& result) const
+    {
+        (void)chunkProvider;
+        (void)options;
+        (void)result;
+
+        return ErrorEnum::eNotSupported;
+    }
 
     /**
      * Destroys object instance.

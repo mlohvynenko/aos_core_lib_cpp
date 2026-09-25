@@ -151,6 +151,13 @@ RetWithError<CK_MECHANISM> PCKS11RSAMechConverter::Visit(const crypto::OAEPDecry
     return mech;
 }
 
+RetWithError<CK_MECHANISM> PCKS11RSAMechConverter::Visit(const crypto::GCMDecryptionOptions& options) const
+{
+    (void)options;
+
+    return {{}, AOS_ERROR_WRAP(ErrorEnum::eNotSupported)};
+}
+
 /***********************************************************************************************************************
  * PKCS11ECDSAPrivateKey
  **********************************************************************************************************************/
@@ -178,6 +185,90 @@ Error PKCS11ECDSAPrivateKey::Sign(
     CK_MECHANISM mechanism = {CKM_ECDSA, nullptr, 0};
 
     return mSession->Sign(&mechanism, mPrivKeyHandle, digest, signature);
+}
+
+/***********************************************************************************************************************
+ * PKCS11AESMechConverter
+ **********************************************************************************************************************/
+
+RetWithError<CK_MECHANISM> PKCS11AESMechConverter::Visit(const crypto::PKCS1v15DecryptionOptions& options) const
+{
+    (void)options;
+
+    return {{}, AOS_ERROR_WRAP(ErrorEnum::eNotSupported)};
+}
+
+RetWithError<CK_MECHANISM> PKCS11AESMechConverter::Visit(const crypto::OAEPDecryptionOptions& options) const
+{
+    (void)options;
+
+    return {{}, AOS_ERROR_WRAP(ErrorEnum::eNotSupported)};
+}
+
+RetWithError<CK_MECHANISM> PKCS11AESMechConverter::Visit(const crypto::GCMDecryptionOptions& options) const
+{
+    if (options.mIV.Size() != crypto::AESCipherItf::cGCMIVSize) {
+        return {{}, AOS_ERROR_WRAP(ErrorEnum::eInvalidArgument)};
+    }
+
+    mGCMParams.pIv       = const_cast<uint8_t*>(options.mIV.Get());
+    mGCMParams.ulIvLen   = static_cast<CK_ULONG>(options.mIV.Size());
+    mGCMParams.ulIvBits  = static_cast<CK_ULONG>(options.mIV.Size() * 8);
+    mGCMParams.ulTagBits = crypto::AESCipherItf::cGCMTagSize * 8;
+
+    return CK_MECHANISM {CKM_AES_GCM, &mGCMParams, sizeof(mGCMParams)};
+}
+
+/***********************************************************************************************************************
+ * AESPrivateKey
+ **********************************************************************************************************************/
+
+AESPrivateKey::AESPrivateKey(const SharedPtr<SessionContext>& session, ObjectHandle keyHandle)
+    : mSession(session)
+    , mKeyHandle(keyHandle)
+{
+    LOG_DBG() << "Create AES secret key";
+}
+
+const crypto::PublicKeyItf& AESPrivateKey::GetPublic() const
+{
+    return mNoPublicKey;
+}
+
+Error AESPrivateKey::Sign(
+    const Array<uint8_t>& digest, const crypto::SignOptions& options, Array<uint8_t>& signature) const
+{
+    (void)digest;
+    (void)options;
+    (void)signature;
+
+    return AOS_ERROR_WRAP(ErrorEnum::eNotSupported);
+}
+
+Error AESPrivateKey::Decrypt(
+    const Array<uint8_t>& cipher, const crypto::DecryptionOptions& options, Array<uint8_t>& result) const
+{
+    PKCS11AESMechConverter visitor;
+
+    auto [mech, err] = options.ApplyVisitor(visitor);
+    if (!err.IsNone()) {
+        return AOS_ERROR_WRAP(err);
+    }
+
+    return mSession->Decrypt(&mech, mKeyHandle, cipher, result);
+}
+
+Error AESPrivateKey::StreamDecrypt(
+    crypto::ChunkProviderItf& chunkProvider, const crypto::DecryptionOptions& options, Array<uint8_t>& result) const
+{
+    PKCS11AESMechConverter visitor;
+
+    auto [mech, err] = options.ApplyVisitor(visitor);
+    if (!err.IsNone()) {
+        return AOS_ERROR_WRAP(err);
+    }
+
+    return mSession->DecryptMultiPart(&mech, mKeyHandle, chunkProvider, result);
 }
 
 } // namespace aos::pkcs11
