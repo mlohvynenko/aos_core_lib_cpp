@@ -14,19 +14,197 @@ namespace aos::sm::imagemanager {
 
 namespace {
 
+constexpr auto cBlockSize = crypto::AESCipherItf::cBlockSize;
+
+// Low 32 bits of the counter blocks GCM derives from a 96-bit IV: J0 = IV || 0x00000001 encrypts the tag,
+// the payload is plain CTR starting at inc32(J0).
+constexpr uint8_t cJ0CounterSuffix[]      = {0x00, 0x00, 0x00, 0x01};
+constexpr uint8_t cPayloadCounterSuffix[] = {0x00, 0x00, 0x00, 0x02};
+
+// GCM's GHASH over a ciphertext without additional authenticated data, fed incrementally. 4-bit table
+// multiplication in GF(2^128) (Shoup's method, as in mbedTLS): the hash key H = AES_K(0^128) comes from the
+// token, everything else is plain arithmetic.
+class GHash {
+public:
+    explicit GHash(const Array<uint8_t>& h)
+    {
+        uint64_t vh = LoadBE64(h.Get());
+        uint64_t vl = LoadBE64(h.Get() + 8);
+
+        // 8 = 0b1000 corresponds to 1 in GF(2^128)
+        mHH[8] = vh;
+        mHL[8] = vl;
+
+        for (size_t i = 4; i > 0; i >>= 1) {
+            uint64_t t = (vl & 1) * 0xe100000000000000ULL;
+
+            vl = (vh << 63) | (vl >> 1);
+            vh = (vh >> 1) ^ t;
+
+            mHH[i] = vh;
+            mHL[i] = vl;
+        }
+
+        for (size_t i = 2; i <= 8; i *= 2) {
+            for (size_t j = 1; j < i; j++) {
+                mHH[i + j] = mHH[i] ^ mHH[j];
+                mHL[i + j] = mHL[i] ^ mHL[j];
+            }
+        }
+    }
+
+    void Update(const Array<uint8_t>& data)
+    {
+        for (const auto byte : data) {
+            mPending[mPendingSize++] = byte;
+
+            if (mPendingSize == cBlockSize) {
+                Absorb(mPending);
+                mPendingSize = 0;
+            }
+        }
+
+        mDataSize += data.Size();
+    }
+
+    // Completes the hash (zero-pads the last partial block, appends the length block) into out.
+    void Finalize(uint8_t (&out)[cBlockSize])
+    {
+        if (mPendingSize != 0) {
+            memset(mPending + mPendingSize, 0, cBlockSize - mPendingSize);
+            Absorb(mPending);
+            mPendingSize = 0;
+        }
+
+        // len(AAD) = 0 || len(C), both in bits, 64-bit big-endian.
+        uint8_t lengths[cBlockSize] = {};
+
+        StoreBE64(static_cast<uint64_t>(mDataSize) * 8, lengths + 8);
+        Absorb(lengths);
+
+        memcpy(out, mY, cBlockSize);
+    }
+
+private:
+    static uint64_t LoadBE64(const uint8_t* data)
+    {
+        uint64_t value = 0;
+
+        for (size_t i = 0; i < 8; i++) {
+            value = (value << 8) | data[i];
+        }
+
+        return value;
+    }
+
+    static void StoreBE64(uint64_t value, uint8_t* data)
+    {
+        for (size_t i = 0; i < 8; i++) {
+            data[7 - i] = static_cast<uint8_t>(value >> (i * 8));
+        }
+    }
+
+    // Y = (Y ^ block) * H
+    void Absorb(const uint8_t* block)
+    {
+        static constexpr uint64_t cLast4[16] = {0x0000, 0x1c20, 0x3840, 0x2460, 0x7080, 0x6ca0, 0x48c0, 0x54e0,
+            0xe100, 0xfd20, 0xd940, 0xc560, 0x9180, 0x8da0, 0xa9c0, 0xb5e0};
+
+        uint8_t x[cBlockSize];
+
+        for (size_t i = 0; i < cBlockSize; i++) {
+            x[i] = mY[i] ^ block[i];
+        }
+
+        uint8_t  lo = x[15] & 0xf;
+        uint64_t zh = mHH[lo];
+        uint64_t zl = mHL[lo];
+
+        for (int i = 15; i >= 0; i--) {
+            lo         = x[i] & 0xf;
+            uint8_t hi = (x[i] >> 4) & 0xf;
+
+            if (i != 15) {
+                uint8_t rem = zl & 0xf;
+
+                zl = (zh << 60) | (zl >> 4);
+                zh = (zh >> 4) ^ (cLast4[rem] << 48) ^ mHH[lo];
+                zl ^= mHL[lo];
+            }
+
+            uint8_t rem = zl & 0xf;
+
+            zl = (zh << 60) | (zl >> 4);
+            zh = (zh >> 4) ^ (cLast4[rem] << 48) ^ mHH[hi];
+            zl ^= mHL[hi];
+        }
+
+        StoreBE64(zh, mY);
+        StoreBE64(zl, mY + 8);
+    }
+
+    uint64_t mHH[16] {};
+    uint64_t mHL[16] {};
+    uint8_t  mY[cBlockSize] {};
+    uint8_t  mPending[cBlockSize] {};
+    size_t   mPendingSize = 0;
+    size_t   mDataSize    = 0;
+};
+
+// Builds a CTR counter block from a 12-byte GCM IV and the counter's low 32 bits.
+Error MakeCounter(const Array<uint8_t>& iv, const uint8_t (&suffix)[4], crypto::CTRDecryptionOptions& options)
+{
+    if (auto err = options.mCounter.Assign(iv); !err.IsNone()) {
+        return AOS_ERROR_WRAP(err);
+    }
+
+    for (const auto byte : suffix) {
+        if (auto err = options.mCounter.PushBack(byte); !err.IsNone()) {
+            return AOS_ERROR_WRAP(err);
+        }
+    }
+
+    return ErrorEnum::eNone;
+}
+
+// Returns AES_K(counter) - the key's CTR keystream block for counter - by CTR-decrypting a zero block on the
+// token: needs nothing beyond the CKA_DECRYPT/CKM_AES_CTR the payload itself is decrypted with.
+Error KeystreamBlock(const crypto::PrivateKeyItf& key, const crypto::CTRDecryptionOptions& options,
+    StaticArray<uint8_t, cBlockSize>& block)
+{
+    StaticArray<uint8_t, cBlockSize> zeros;
+
+    if (auto err = zeros.Resize(cBlockSize, 0); !err.IsNone()) {
+        return AOS_ERROR_WRAP(err);
+    }
+
+    if (auto err = key.Decrypt(zeros, crypto::DecryptionOptions {options}, block); !err.IsNone()) {
+        return AOS_ERROR_WRAP(err);
+    }
+
+    if (block.Size() != cBlockSize) {
+        return AOS_ERROR_WRAP(Error(ErrorEnum::eFailed, "unexpected keystream block size"));
+    }
+
+    return ErrorEnum::eNone;
+}
+
 // Adapts an open fs::File into a crypto::ChunkProviderItf, so the whole ciphertext file never needs to be
 // read into memory before decrypting it. Delivers exactly size bytes from the file's current position, so
-// trailing data (the GCM tag) is left out. buffer is allocator-owned by the caller (BlobDecryptor, which has
+// trailing data (the GCM tag) is left out, and feeds every delivered byte into ghash. buffer is allocator-owned by the caller (BlobDecryptor, which has
 // an AllocatorItf) rather than by this class itself: a chunk-sized (tens of KiB) buffer would blow the
 // stack budget on a stack-constrained target if it lived in a local variable instead.
 class FileChunkProvider : public crypto::ChunkProviderItf {
 public:
-    FileChunkProvider(fs::File& file, Array<uint8_t>& buffer, size_t size)
+    FileChunkProvider(fs::File& file, Array<uint8_t>& buffer, size_t size, GHash& ghash)
         : mFile(file)
         , mBuffer(buffer)
         , mRemaining(size)
+        , mGHash(ghash)
     {
     }
+
+    bool IsExhausted() const { return mRemaining == 0; }
 
     RetWithError<Array<uint8_t>> NextChunk() override
     {
@@ -46,6 +224,8 @@ public:
 
         mRemaining -= chunk.Size();
 
+        mGHash.Update(chunk);
+
         return {chunk, ErrorEnum::eNone};
     }
 
@@ -53,6 +233,7 @@ private:
     fs::File&       mFile;
     Array<uint8_t>& mBuffer;
     size_t          mRemaining;
+    GHash&          mGHash;
 };
 
 // Adapts an open fs::File into a crypto::ChunkReceiverItf, so decrypted data is written out as the key
@@ -87,8 +268,6 @@ private:
 /***********************************************************************************************************************
  * Public
  **********************************************************************************************************************/
-
-constexpr uint8_t BlobDecryptor::cGCMPayloadCounterSuffix[];
 
 Error BlobDecryptor::Init(AllocatorItf& allocator, iamclient::CertProviderItf& certProvider,
     crypto::CertLoaderItf& certLoader, const String& certType)
@@ -220,18 +399,27 @@ Error BlobDecryptor::StreamDecrypt(const crypto::PrivateKeyItf& key, const Strin
         return AOS_ERROR_WRAP(Error(ErrorEnum::eInvalidArgument, "encrypted file too short to contain an IV"));
     }
 
-    // GCM encrypts the payload with plain AES-CTR, starting from counter block IV || 0x00000002 (J0 + 1;
-    // J0 = IV || 0x00000001 itself is only used to encrypt the tag), so CTR decrypts it as is.
-    crypto::CTRDecryptionOptions ctrOptions;
+    StaticArray<uint8_t, cBlockSize> keystream;
+    crypto::CTRDecryptionOptions     ctrOptions;
 
-    if (auto err = ctrOptions.mCounter.Assign(iv); !err.IsNone()) {
+    // GHASH key H = AES_K(0^128), i.e. the keystream block for an all-zero counter.
+    if (auto err = ctrOptions.mCounter.Resize(cBlockSize, 0); !err.IsNone()) {
         return AOS_ERROR_WRAP(err);
     }
 
-    for (const uint8_t byte : cGCMPayloadCounterSuffix) {
-        if (auto err = ctrOptions.mCounter.PushBack(byte); !err.IsNone()) {
-            return AOS_ERROR_WRAP(err);
-        }
+    if (auto err = KeystreamBlock(key, ctrOptions, keystream); !err.IsNone()) {
+        return err;
+    }
+
+    auto ghash = MakeUnique<GHash>(mAllocator, keystream);
+    if (!ghash) {
+        return AOS_ERROR_WRAP(ErrorEnum::eNoMemory);
+    }
+
+    // GCM encrypts the payload with plain AES-CTR, starting from counter block IV || 0x00000002, so CTR
+    // decrypts it as is.
+    if (auto err = MakeCounter(iv, cPayloadCounterSuffix, ctrOptions); !err.IsNone()) {
+        return err;
     }
 
     // fixed-size chunk buffer, reused for every chunk read off disk: this is what keeps ciphertext-side
@@ -247,11 +435,55 @@ Error BlobDecryptor::StreamDecrypt(const crypto::PrivateKeyItf& key, const Strin
 
     Array<uint8_t> chunk(static_cast<uint8_t*>(chunkBuf), cDecryptChunkSize);
 
-    // the trailing tag is not passed on: CTR doesn't verify it.
-    FileChunkProvider chunkProvider(
-        input, chunk, encryptedSize - crypto::AESCipherItf::cGCMIVSize - crypto::AESCipherItf::cGCMTagSize);
+    // the trailing tag is not passed on to the token: it's verified below instead.
+    FileChunkProvider chunkProvider(input, chunk,
+        encryptedSize - crypto::AESCipherItf::cGCMIVSize - crypto::AESCipherItf::cGCMTagSize, *ghash);
 
-    return key.StreamDecrypt(chunkProvider, crypto::DecryptionOptions {ctrOptions}, chunkReceiver);
+    if (auto err = key.StreamDecrypt(chunkProvider, crypto::DecryptionOptions {ctrOptions}, chunkReceiver);
+        !err.IsNone()) {
+        return err;
+    }
+
+    // the tag must cover the whole ciphertext, not just whatever the key happened to consume.
+    if (!chunkProvider.IsExhausted()) {
+        return AOS_ERROR_WRAP(Error(ErrorEnum::eFailed, "ciphertext not fully decrypted"));
+    }
+
+    StaticArray<uint8_t, crypto::AESCipherItf::cGCMTagSize> tag;
+
+    if (auto err = input.ReadBlock(tag); !err.IsNone() && !err.Is(ErrorEnum::eEOF)) {
+        return AOS_ERROR_WRAP(err);
+    }
+
+    if (tag.Size() != crypto::AESCipherItf::cGCMTagSize) {
+        return AOS_ERROR_WRAP(Error(ErrorEnum::eInvalidArgument, "encrypted file too short to contain a tag"));
+    }
+
+    // expected tag = AES_K(J0) ^ GHASH_H(ciphertext), J0 = IV || 0x00000001.
+    if (auto err = MakeCounter(iv, cJ0CounterSuffix, ctrOptions); !err.IsNone()) {
+        return err;
+    }
+
+    if (auto err = KeystreamBlock(key, ctrOptions, keystream); !err.IsNone()) {
+        return err;
+    }
+
+    uint8_t expected[cBlockSize];
+
+    ghash->Finalize(expected);
+
+    // constant time: don't reveal how many leading tag bytes matched.
+    uint8_t diff = 0;
+
+    for (size_t i = 0; i < cBlockSize; i++) {
+        diff |= static_cast<uint8_t>(expected[i] ^ keystream[i] ^ tag[i]);
+    }
+
+    if (diff != 0) {
+        return AOS_ERROR_WRAP(Error(ErrorEnum::eInvalidChecksum, "authentication tag mismatch"));
+    }
+
+    return ErrorEnum::eNone;
 }
 
 } // namespace aos::sm::imagemanager
