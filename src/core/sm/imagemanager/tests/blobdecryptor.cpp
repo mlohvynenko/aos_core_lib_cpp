@@ -7,7 +7,6 @@
 #include <algorithm>
 #include <filesystem>
 #include <fstream>
-#include <functional>
 #include <iterator>
 #include <string>
 #include <vector>
@@ -146,13 +145,12 @@ protected:
     BlobDecryptor mDecryptor;
 };
 
-TEST_F(BlobDecryptorTest, SplitsIVAndStreamsCipherToKey)
+TEST_F(BlobDecryptorTest, SplitsIVAndTagAndStreamsCipherToKey)
 {
-    const auto iv           = Pattern(cIVLen, 1);
-    const auto ciphertext   = Pattern(1000, 2);
-    const auto tag          = Pattern(cTagLen, 3);
-    const auto plain        = Pattern(1000, 4);
-    const auto cipherAndTag = Concat(ciphertext, tag);
+    const auto iv         = Pattern(cIVLen, 1);
+    const auto ciphertext = Pattern(1000, 2);
+    const auto tag        = Pattern(cTagLen, 3);
+    const auto plain      = Pattern(1000, 4);
 
     WriteBytes(mEncryptedPath, Concat(Concat(iv, ciphertext), tag));
 
@@ -174,15 +172,16 @@ TEST_F(BlobDecryptorTest, SplitsIVAndStreamsCipherToKey)
             return {mKey, ErrorEnum::eNone};
         }));
 
-    // BlobDecryptor::Decrypt tries StreamDecrypt first: verify it reads the file's IV correctly and, by
-    // draining chunkProvider entirely, that the rest of the file (ciphertext + tag) reaches the key intact,
+    // verify the CTR counter starts where GCM's payload keystream does (IV || 0x00000002) and, by draining
+    // chunkProvider entirely, that exactly the ciphertext (without the trailing tag) reaches the key intact,
     // however many chunks it takes to deliver it.
     EXPECT_CALL(*mKey, StreamDecrypt(_, _, _))
         .WillOnce(Invoke([&](crypto::ChunkProviderItf& chunkProvider, const crypto::DecryptionOptions& options,
                              crypto::ChunkReceiverItf& chunkReceiver) {
-            const auto& gcmOptions = options.GetValue<crypto::GCMDecryptionOptions>();
+            const auto& ctrOptions      = options.GetValue<crypto::CTRDecryptionOptions>();
+            const auto  expectedCounter = Concat(iv, Bytes {0x00, 0x00, 0x00, 0x02});
 
-            EXPECT_EQ(gcmOptions.mIV, Array<uint8_t>(iv.data(), iv.size()));
+            EXPECT_EQ(ctrOptions.mCounter, Array<uint8_t>(expectedCounter.data(), expectedCounter.size()));
 
             Bytes drained;
 
@@ -201,7 +200,7 @@ TEST_F(BlobDecryptorTest, SplitsIVAndStreamsCipherToKey)
                 drained.insert(drained.end(), chunk.begin(), chunk.end());
             }
 
-            EXPECT_EQ(drained, cipherAndTag);
+            EXPECT_EQ(drained, ciphertext);
 
             // deliver the plaintext in two parts, through the receiver's own buffer, to check that every
             // chunk reaches the output file in order.
@@ -541,7 +540,9 @@ TEST_F(BlobDecryptorRoundTripTest, DecryptsBlobProducedByAnIndependentGCMImpleme
     EXPECT_EQ(ReadBytes(mDecryptedPath), plain);
 }
 
-TEST_F(BlobDecryptorRoundTripTest, WrongKeyIsRejectedAndLeavesNoOutput)
+// The tag isn't verified (see BlobDecryptor): integrity is the manifest digest's job. These pin that
+// behavior down, so that a change in it is a deliberate one.
+TEST_F(BlobDecryptorRoundTripTest, WrongKeyDecryptsToGarbage)
 {
     const auto key   = Pattern(32, 30);
     const auto plain = Pattern(1000, 33);
@@ -552,11 +553,15 @@ TEST_F(BlobDecryptorRoundTripTest, WrongKeyIsRejectedAndLeavesNoOutput)
 
     ASSERT_NO_FATAL_FAILURE(Encrypt(key, Pattern(cIVLen, 32), plain, blob));
 
-    EXPECT_FALSE(DecryptBlob(blob).IsNone());
-    EXPECT_FALSE(std::filesystem::exists(mDecryptedPath));
+    ASSERT_TRUE(DecryptBlob(blob).IsNone());
+
+    const auto decrypted = ReadBytes(mDecryptedPath);
+
+    EXPECT_EQ(decrypted.size(), plain.size());
+    EXPECT_NE(decrypted, plain);
 }
 
-TEST_F(BlobDecryptorRoundTripTest, ModifiedBlobIsRejectedAndLeavesNoOutput)
+TEST_F(BlobDecryptorRoundTripTest, TagIsNotVerified)
 {
     const auto key   = Pattern(32, 40);
     const auto plain = Pattern(1000, 42);
@@ -567,33 +572,10 @@ TEST_F(BlobDecryptorRoundTripTest, ModifiedBlobIsRejectedAndLeavesNoOutput)
 
     ASSERT_NO_FATAL_FAILURE(Encrypt(key, Pattern(cIVLen, 41), plain, blob));
 
-    struct Case {
-        const char*                 mName;
-        std::function<void(Bytes&)> mModify;
-    };
+    blob.back() ^= 0x01;
 
-    const std::vector<Case> cases {
-        {"IV", [](Bytes& b) { b[0] ^= 0x01; }},
-        {"first ciphertext byte", [](Bytes& b) { b[cIVLen] ^= 0x01; }},
-        {"ciphertext in the middle", [](Bytes& b) { b[b.size() / 2] ^= 0x80; }},
-        {"last ciphertext byte", [](Bytes& b) { b[b.size() - cTagLen - 1] ^= 0x01; }},
-        {"tag", [](Bytes& b) { b[b.size() - 1] ^= 0x01; }},
-        {"truncated by one byte", [](Bytes& b) { b.pop_back(); }},
-        {"extra trailing byte", [](Bytes& b) { b.push_back(0); }},
-    };
-
-    for (const auto& test : cases) {
-        SCOPED_TRACE(test.mName);
-
-        auto modified = blob;
-
-        test.mModify(modified);
-
-        std::filesystem::remove(mDecryptedPath);
-
-        EXPECT_FALSE(DecryptBlob(modified).IsNone());
-        EXPECT_FALSE(std::filesystem::exists(mDecryptedPath)) << "unauthenticated plaintext was left behind";
-    }
+    ASSERT_TRUE(DecryptBlob(blob).IsNone());
+    EXPECT_EQ(ReadBytes(mDecryptedPath), plain);
 }
 
 TEST_F(BlobDecryptorRoundTripTest, BlobWithoutRoomForTagIsRejected)

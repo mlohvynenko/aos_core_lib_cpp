@@ -16,19 +16,26 @@ symmetric key that is never transmitted over the network.
   layer-key-specific label constant anywhere in this code — provisioning just needs to import the key under
   whatever id/label that cert module is configured with in IAM.
 - The key is provisioned **non-extractable** (`CKA_EXTRACTABLE=CK_FALSE`, `CKA_SENSITIVE=CK_TRUE`) and is
-  never read off the token: all AES-GCM decryption happens through PKCS11 operations on the token itself
+  never read off the token: all decryption happens through PKCS11 operations on the token itself
   (`aos::pkcs11::AESPrivateKey`, which implements `aos::crypto::PrivateKeyItf` the same way
   `PKCS11RSAPrivateKey`/`PKCS11ECDSAPrivateKey` do — `GetPublic`/`Sign` simply aren't supported for it; only
-  `Decrypt`/`StreamDecrypt` with `crypto::GCMDecryptionOptions` are, via a single-shot `C_Decrypt` or a
+  `Decrypt`/`StreamDecrypt` with `crypto::GCMDecryptionOptions` or `crypto::CTRDecryptionOptions` are, via a
+  single-shot `C_Decrypt` or a
   multi-part `C_DecryptUpdate`+`C_DecryptFinal` operation respectively — see "On-device decryption" below).
   The raw key bytes exist only at provisioning time, on the machine that generates them — the running node
   process never holds them, and loading this key goes through the very same `CertLoaderItf::LoadPrivKeyByURL`
   any other private key does.
 - The key is looked up lazily, the first time an encrypted layer is actually installed — a node with no
   key provisioned starts up normally and only fails when asked to install an encrypted layer.
-- The algorithm is AES-256-GCM: authenticated encryption, so a wrong key or a modified blob is detected
-  and rejected instead of decrypting to garbage. GCM is a stream mode, so no padding is involved (PKCS7
-  only applies to CBC).
+- Blobs are produced with AES-256-GCM, but the node decrypts them with **AES-256-CTR** and does **not**
+  check the authentication tag. GCM encrypts its payload with plain CTR, starting from counter block
+  `IV || 00 00 00 02`, so CTR decrypts the same ciphertext to the same plaintext. The reason is token
+  memory: OP-TEE's PKCS11 TA keeps the whole GCM plaintext in its TA heap until `C_DecryptFinal` has
+  verified the tag, so any blob larger than that heap (256 KiB on RPi) fails with `CKR_DEVICE_MEMORY`,
+  whereas CTR streams with constant token memory. Integrity comes from the blob digest instead: the
+  encrypted blob is checked against its manifest `ContentDescriptor` digest right after download, before
+  it is decrypted. A wrong key therefore doesn't fail decryption: it yields garbage, which then fails to
+  unpack. No padding is involved either way (PKCS7 only applies to CBC).
 - The IV (nonce) is not derived or coordinated separately: it travels with the data as the first 12 bytes
   of the encrypted blob (see `aos::sm::imagemanager::BlobDecryptor`). Producing an encrypted blob therefore
   needs no synchronization with the device beyond knowing the AES key. Use a fresh random IV for every
@@ -134,18 +141,21 @@ file) is the manifest `ContentDescriptor` digest.
    `CKO_PRIVATE_KEY`/`CKO_PUBLIC_KEY` matching) and, if found, wraps it as an `aos::pkcs11::AESPrivateKey`.
    The resulting `aos::crypto::PrivateKeyItf` handle is cached after the first lookup. There is no separate
    key-provider class: this all lives directly in `BlobDecryptor`, since nothing else needs the key.
-3. `Decrypt` reads the IV (first 12 bytes) and then decrypts the rest (ciphertext followed by the 16-byte
-   authentication tag) via `key->StreamDecrypt` — there is no whole-buffer fallback, so the key/token this
+3. `Decrypt` reads the IV (first 12 bytes) and then decrypts the ciphertext (everything up to, but not
+   including, the 16-byte authentication tag) via `key->StreamDecrypt` with `crypto::CTRDecryptionOptions`
+   (initial counter block `IV || 00 00 00 02`) — there is no whole-buffer fallback, so the key/token this
    class is used with must support it (`pkcs11::AESPrivateKey` does):
    - `StreamDecrypt` reads the file in `cDecryptChunkSize` chunks (a `crypto::ChunkProviderItf` wrapping the
      open file) and feeds them into `AESPrivateKey::StreamDecrypt`, which runs a multi-part PKCS11
-     `CKM_AES_GCM` / `C_DecryptUpdate`+`C_DecryptFinal` operation (`pkcs11::SessionContext::DecryptMultiPart`)
-     — so the ciphertext never needs to be fully buffered in memory. Decrypted data is handed back through a
-     `crypto::ChunkReceiverItf` (wrapping the staged output file) as the token releases it, and written out
-     straight away. The receiver's plaintext buffer still has to be
-     sized for the whole file regardless: empirically (against SoftHSM2) and per most PKCS11 modules, AEAD
-     decryption only releases data once the authentication tag has been verified, all at once, at
-     `C_DecryptFinal` — chunking only bounds the ciphertext side, not the plaintext side.
+     `CKM_AES_CTR` / `C_DecryptUpdate`+`C_DecryptFinal` operation (`pkcs11::SessionContext::DecryptMultiPart`)
+     — so the ciphertext never needs to be fully buffered in memory. Each `C_DecryptUpdate` releases as much
+     plaintext as it was given ciphertext, handed back through a `crypto::ChunkReceiverItf` (wrapping the
+     staged output file) and written out straight away, so the plaintext buffer is one chunk too.
+   - `AESPrivateKey` first passes `ulCounterBits = 128` (the whole block is the counter, as PKCS#11 defines
+     it). OP-TEE's PKCS11 TA (checked against 4.2.0) misreads that field and rejects anything but `1` with
+     `CKR_MECHANISM_PARAM_INVALID` at `C_DecryptInit`, while incrementing the full 128-bit block anyway; on
+     that error `AESPrivateKey` retries with `1`. Nothing has been consumed at that point, so the retry is
+     safe.
    - `cDecryptChunkSize` (`AOS_CONFIG_IMAGEMANAGER_DECRYPT_CHUNK_SIZE`, default 16 KiB) is deliberately
      smaller than the generic `cFileChunkSize` (64 KiB): empirically, a TEE-backed PKCS11 module (OP-TEE's
      `libckteec`) rejects a single `C_DecryptUpdate` call above ~34 KiB with `CKR_DEVICE_MEMORY` - its
@@ -156,14 +166,12 @@ file) is the manifest `ContentDescriptor` digest.
      only does so once data is actually pushed through, not at `C_DecryptInit`. This conflates that case
      with any other first-chunk failure, including a chunk that's simply too large
      (`CKR_DEVICE_MEMORY`) — confirmed empirically: with `cFileChunkSize` (64 KiB) this misreported as
-     "not supported" on a real device whose token actually supports multi-part `CKM_AES_GCM` fine, just not
+     "not supported" on a real device whose token actually supports multi-part decryption fine, just not
      at that chunk size. If "not supported" ever recurs in practice, check the real `CK_RV` before assuming
      it's a genuine capability gap rather than `cDecryptChunkSize` still being too large for that target;
    - either way, the key's own value is never read by this code — only PKCS11 operations run on the token;
-   - output is staged to a temporary file and only put in place once decoding, including the
-     authentication tag check, fully succeeds. If the tag doesn't match — wrong key, modified or
-     truncated blob — decryption fails and the staged output is deleted, so unauthenticated plaintext is
-     never left on disk.
+   - output is staged to a temporary file and only put in place once decryption fully succeeds; on any
+     failure the staged output is deleted, so partial plaintext is never left on disk.
 4. The result is the plaintext gzip'd tar, unpacked normally like any other layer.
 
 This is separate from `CryptoHelperItf::Decrypt`, which still handles the cloud-delivered blobs handled by
@@ -174,8 +182,9 @@ in-process rather than one kept non-extractable on a token.
 ### Manually verifying an encrypted blob
 
 Useful when a layer fails to install and you want to check, independently of the running node, whether
-the `.enc` file and the key provisioned to the device actually match. GCM makes this unambiguous: with the
-wrong key or a damaged file decryption fails with an authentication error instead of producing garbage.
+the `.enc` file and the key provisioned to the device actually match. The node itself doesn't check the GCM
+tag (see "Design" above), but doing it here makes this unambiguous: with the wrong key or a damaged file,
+decryption fails with an authentication error instead of producing garbage.
 
 The key is provisioned non-extractable, so it can no longer be read back off the token (`--read-object`
 fails by design, the same as it would for the cert module's own private key) — use your own secrets-store

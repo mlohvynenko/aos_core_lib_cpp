@@ -90,9 +90,21 @@ struct GCMDecryptionOptions {
 };
 
 /**
+ * AES-CTR decryption options.
+ */
+struct CTRDecryptionOptions {
+    /**
+     * Initial counter block: AESCipherItf::cBlockSize (16) bytes, incremented as a single big-endian 128-bit
+     * value for each subsequent block.
+     */
+    StaticArray<uint8_t, AESCipherItf::cBlockSize> mCounter;
+};
+
+/**
  * Decryption options.
  */
-using DecryptionOptions = Variant<PKCS1v15DecryptionOptions, OAEPDecryptionOptions, GCMDecryptionOptions>;
+using DecryptionOptions
+    = Variant<PKCS1v15DecryptionOptions, OAEPDecryptionOptions, GCMDecryptionOptions, CTRDecryptionOptions>;
 
 /**
  * Supplies data chunks on demand to a streaming operation (see PrivateKeyItf::StreamDecrypt), so the
