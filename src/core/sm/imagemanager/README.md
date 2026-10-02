@@ -140,7 +140,9 @@ file) is the manifest `ContentDescriptor` digest.
    - `StreamDecrypt` reads the file in `cDecryptChunkSize` chunks (a `crypto::ChunkProviderItf` wrapping the
      open file) and feeds them into `AESPrivateKey::StreamDecrypt`, which runs a multi-part PKCS11
      `CKM_AES_GCM` / `C_DecryptUpdate`+`C_DecryptFinal` operation (`pkcs11::SessionContext::DecryptMultiPart`)
-     — so the ciphertext never needs to be fully buffered in memory. The *plaintext* buffer still has to be
+     — so the ciphertext never needs to be fully buffered in memory. Decrypted data is handed back through a
+     `crypto::ChunkReceiverItf` (wrapping the staged output file) as the token releases it, and written out
+     straight away. The receiver's plaintext buffer still has to be
      sized for the whole file regardless: empirically (against SoftHSM2) and per most PKCS11 modules, AEAD
      decryption only releases data once the authentication tag has been verified, all at once, at
      `C_DecryptFinal` — chunking only bounds the ciphertext side, not the plaintext side.

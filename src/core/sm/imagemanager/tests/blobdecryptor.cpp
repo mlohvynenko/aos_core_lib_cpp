@@ -179,7 +179,7 @@ TEST_F(BlobDecryptorTest, SplitsIVAndStreamsCipherToKey)
     // however many chunks it takes to deliver it.
     EXPECT_CALL(*mKey, StreamDecrypt(_, _, _))
         .WillOnce(Invoke([&](crypto::ChunkProviderItf& chunkProvider, const crypto::DecryptionOptions& options,
-                             Array<uint8_t>& result) {
+                             crypto::ChunkReceiverItf& chunkReceiver) {
             const auto& gcmOptions = options.GetValue<crypto::GCMDecryptionOptions>();
 
             EXPECT_EQ(gcmOptions.mIV, Array<uint8_t>(iv.data(), iv.size()));
@@ -203,7 +203,23 @@ TEST_F(BlobDecryptorTest, SplitsIVAndStreamsCipherToKey)
 
             EXPECT_EQ(drained, cipherAndTag);
 
-            return result.Assign(Array<uint8_t>(plain.data(), plain.size()));
+            // deliver the plaintext in two parts, through the receiver's own buffer, to check that every
+            // chunk reaches the output file in order.
+            auto& buffer = chunkReceiver.GetBuffer();
+
+            EXPECT_GE(buffer.MaxSize(), plain.size());
+
+            const auto half = plain.size() / 2;
+
+            for (const auto& [offset, size] : {std::pair {size_t {0}, half}, std::pair {half, plain.size() - half}}) {
+                std::copy_n(plain.begin() + offset, size, buffer.Get());
+
+                if (auto err = chunkReceiver.OnChunk(Array<uint8_t>(buffer.Get(), size)); !err.IsNone()) {
+                    return err;
+                }
+            }
+
+            return Error(ErrorEnum::eNone);
         }));
 
     ASSERT_TRUE(mDecryptor.Decrypt(mEncryptedPath.c_str(), mDecryptedPath.c_str()).IsNone());

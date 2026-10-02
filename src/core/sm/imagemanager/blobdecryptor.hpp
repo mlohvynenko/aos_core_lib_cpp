@@ -42,7 +42,8 @@ constexpr auto cDecryptChunkSize = AOS_CONFIG_IMAGEMANAGER_DECRYPT_CHUNK_SIZE;
  *
  * Decrypt reads the ciphertext off disk in chunks via key->StreamDecrypt, rather than buffering the whole
  * file, so the token/key this class is Init'd with must support that (pkcs11::AESPrivateKey does; there is
- * no whole-buffer fallback here). The *plaintext* buffer is still sized for the whole file regardless: most
+ * no whole-buffer fallback here), and writes decrypted data to the staged output file as the key releases it.
+ * The *plaintext* buffer is still sized for the whole file regardless: most
  * PKCS11 modules only release AEAD-decrypted data once the authentication tag has been verified, all at
  * once, so chunking only ever reduces the ciphertext-side memory footprint, not the plaintext side.
  */
@@ -79,7 +80,7 @@ private:
     // whatever error key.StreamDecrypt returns, including ErrorEnum::eNotSupported if the key/token
     // doesn't support it - there is no whole-buffer fallback.
     Error StreamDecrypt(const crypto::PrivateKeyItf& key, const String& encryptedPath,
-        crypto::GCMDecryptionOptions& gcmOptions, Array<uint8_t>& plaintext) const;
+        crypto::GCMDecryptionOptions& gcmOptions, crypto::ChunkReceiverItf& chunkReceiver) const;
 
     AllocatorItf*                    mAllocator {};
     Mutex                            mKeyMutex;

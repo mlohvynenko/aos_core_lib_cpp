@@ -253,19 +253,20 @@ public:
 
     /**
      * Same as Decrypt, but reads the ciphertext incrementally from chunkProvider via a multi-part
-     * PKCS11 operation instead of requiring it all in memory up front (see
-     * SessionContext::DecryptMultiPart). result must still have capacity for the whole plaintext:
-     * most PKCS11 modules, including SoftHSM2, only release AEAD-decrypted data once the
-     * authentication tag has been verified, all at once, at the very end.
+     * PKCS11 operation instead of requiring it all in memory up front, and hands decrypted data to
+     * chunkReceiver as the token releases it (see SessionContext::DecryptMultiPart). chunkReceiver's
+     * buffer must still have capacity for the whole plaintext: most PKCS11 modules, including
+     * SoftHSM2, only release AEAD-decrypted data once the authentication tag has been verified, all
+     * at once, at the very end.
      *
      * @param chunkProvider supplies the cipher message in chunks.
      * @param options decryption options; must hold GCMDecryptionOptions.
-     * @param[out] result decoded message.
+     * @param chunkReceiver receives the decoded message in chunks.
      * @return Error. ErrorEnum::eNotSupported if this token doesn't support multi-part CKM_AES_GCM
      * decrypt operations at all: retry via Decrypt() instead.
      */
     Error StreamDecrypt(crypto::ChunkProviderItf& chunkProvider, const crypto::DecryptionOptions& options,
-        Array<uint8_t>& result) const override;
+        crypto::ChunkReceiverItf& chunkReceiver) const override;
 
 private:
     // Only exists to satisfy PrivateKeyItf::GetPublic's reference-returning signature for a key type that

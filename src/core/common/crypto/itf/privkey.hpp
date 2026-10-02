@@ -121,6 +121,38 @@ public:
 };
 
 /**
+ * Receives data chunks produced by a streaming operation (see PrivateKeyItf::StreamDecrypt), so the caller
+ * can handle output (e.g. write it to a file) as it comes back instead of collecting it into a single array.
+ * Like ChunkProviderItf, the receiver owns the buffer output is written into: the streaming operation writes
+ * each produced chunk into GetBuffer() and then hands it back via OnChunk.
+ */
+class ChunkReceiverItf {
+public:
+    /**
+     * Returns the buffer the next output chunk is written into. Its MaxSize bounds how much output a single
+     * step of the operation may produce: many PKCS11 tokens only release AEAD-decrypted data all at once,
+     * at the very end, so for those it must have capacity for the whole output.
+     *
+     * @return Array<uint8_t>&.
+     */
+    virtual Array<uint8_t>& GetBuffer() = 0;
+
+    /**
+     * Handles the next output chunk. chunk is a view into GetBuffer() and is only valid until this call
+     * returns. Never called with an empty chunk.
+     *
+     * @param chunk output chunk.
+     * @return Error. Any error aborts the streaming operation and is returned to its caller.
+     */
+    virtual Error OnChunk(const Array<uint8_t>& chunk) = 0;
+
+    /**
+     * Destroys object instance.
+     */
+    virtual ~ChunkReceiverItf() = default;
+};
+
+/**
  * Public key interface.
  */
 class PublicKeyItf {
@@ -182,24 +214,26 @@ public:
     /**
      * Decrypts a cipher message supplied incrementally by chunkProvider, so the whole ciphertext
      * doesn't need to be held in memory at once - only whatever chunk size chunkProvider hands back
-     * at a time. This doesn't necessarily bound *output* memory the same way: many PKCS11 tokens
-     * only release AEAD-decrypted data once the authentication tag has been verified, all at once,
-     * at the very end, so result must still have capacity for the whole plaintext regardless of how
-     * the input was chunked (see pkcs11::AESPrivateKey for the concrete behavior). Default
-     * implementation returns ErrorEnum::eNotSupported; only override it where streaming input
-     * actually helps.
+     * at a time. Decrypted data is handed to chunkReceiver as it becomes available. This doesn't
+     * necessarily bound *output* memory the same way: many PKCS11 tokens only release AEAD-decrypted
+     * data once the authentication tag has been verified, all at once, at the very end, so
+     * chunkReceiver's buffer must still have capacity for the whole plaintext regardless of how the
+     * input was chunked (see pkcs11::AESPrivateKey for the concrete behavior). Note that, for tokens
+     * that do release data early, chunkReceiver may get plaintext before the tag is verified: it must
+     * not trust it until StreamDecrypt returns successfully. Default implementation returns
+     * ErrorEnum::eNotSupported; only override it where streaming input actually helps.
      *
      * @param chunkProvider supplies the cipher message in chunks.
      * @param options decryption options.
-     * @param[out] result decoded message.
+     * @param chunkReceiver receives the decoded message in chunks.
      * @return Error.
      */
     virtual Error StreamDecrypt(
-        ChunkProviderItf& chunkProvider, const DecryptionOptions& options, Array<uint8_t>& result) const
+        ChunkProviderItf& chunkProvider, const DecryptionOptions& options, ChunkReceiverItf& chunkReceiver) const
     {
         (void)chunkProvider;
         (void)options;
-        (void)result;
+        (void)chunkReceiver;
 
         return ErrorEnum::eNotSupported;
     }

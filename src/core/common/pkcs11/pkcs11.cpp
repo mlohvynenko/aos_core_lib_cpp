@@ -761,7 +761,7 @@ Error SessionContext::Decrypt(
 }
 
 Error SessionContext::DecryptMultiPart(CK_MECHANISM_PTR mechanism, ObjectHandle privKey,
-    crypto::ChunkProviderItf& chunkProvider, Array<uint8_t>& result) const
+    crypto::ChunkProviderItf& chunkProvider, crypto::ChunkReceiverItf& chunkReceiver) const
 {
     LockGuard lock {mMutex};
 
@@ -769,16 +769,23 @@ Error SessionContext::DecryptMultiPart(CK_MECHANISM_PTR mechanism, ObjectHandle 
         return err;
     }
 
-    // Grow to full capacity up front: Array::Resize zero-fills newly exposed elements when growing, which
-    // would clobber the raw C_DecryptUpdate/C_DecryptFinal writes below if they landed before a later
-    // resize-up. Writing into an already-full-size buffer and only ever shrinking afterward (which doesn't
-    // zero anything) avoids that, matching the single-shot Decrypt() above.
-    if (auto err = result.Resize(result.MaxSize()); !err.IsNone()) {
-        return AOS_ERROR_WRAP(err);
-    }
+    // Raw C_DecryptUpdate/C_DecryptFinal writes go straight into the receiver's buffer storage, bounded by its
+    // MaxSize: the buffer itself is never resized (growing an Array zero-fills it), only a view of the bytes
+    // actually produced is handed back to the receiver.
+    auto& buffer = chunkReceiver.GetBuffer();
 
-    size_t written           = 0;
+    auto deliver = [&](CK_ULONG size) -> Error {
+        LOG_DBG() << "Delivering decrypted chunk" << Log::Field("size", size);
+
+        if (size == 0) {
+            return ErrorEnum::eNone;
+        }
+
+        return chunkReceiver.OnChunk(Array<uint8_t>(buffer.Get(), size));
+    };
+
     bool   anyChunkDecrypted = false;
+    size_t i                 = 0;
 
     while (true) {
         auto [chunk, err] = chunkProvider.NextChunk();
@@ -786,19 +793,23 @@ Error SessionContext::DecryptMultiPart(CK_MECHANISM_PTR mechanism, ObjectHandle 
             break;
         }
 
+        LOG_DBG() << "Received chunk" << Log::Field("index", i) << Log::Field("size", chunk.Size());
+
         if (!err.IsNone()) {
             return err;
         }
 
-        CK_ULONG outSize = result.MaxSize() - written;
+        i++;
 
-        err = DecryptUpdate(chunk, result.Get() + written, &outSize);
+        CK_ULONG outSize = buffer.MaxSize();
+
+        err = DecryptUpdate(chunk, buffer.Get(), &outSize);
         if (!err.IsNone()) {
             // Some PKCS11 modules don't support multi-part operations for AEAD mechanisms like
             // CKM_AES_GCM at all: they only fail once actual data is pushed through
             // C_DecryptUpdate, not at C_DecryptInit. Nothing has been consumed from chunkProvider
-            // except this one chunk, so if it's the very first, the caller can safely retry via a
-            // fresh, single-shot decrypt instead.
+            // except this one chunk, and nothing has been handed to chunkReceiver, so if it's the very
+            // first, the caller can safely retry via a fresh, single-shot decrypt instead.
             if (!anyChunkDecrypted) {
                 return AOS_ERROR_WRAP(ErrorEnum::eNotSupported);
             }
@@ -807,12 +818,15 @@ Error SessionContext::DecryptMultiPart(CK_MECHANISM_PTR mechanism, ObjectHandle 
         }
 
         anyChunkDecrypted = true;
-        written += outSize;
+
+        if (err = deliver(outSize); !err.IsNone()) {
+            return err;
+        }
     }
 
-    CK_ULONG finalSize = result.MaxSize() - written;
+    CK_ULONG finalSize = buffer.MaxSize();
 
-    if (auto err = DecryptFinal(result.Get() + written, &finalSize); !err.IsNone()) {
+    if (auto err = DecryptFinal(buffer.Get(), &finalSize); !err.IsNone()) {
         if (!anyChunkDecrypted) {
             return AOS_ERROR_WRAP(ErrorEnum::eNotSupported);
         }
@@ -820,9 +834,7 @@ Error SessionContext::DecryptMultiPart(CK_MECHANISM_PTR mechanism, ObjectHandle 
         return err;
     }
 
-    written += finalSize;
-
-    return result.Resize(written);
+    return deliver(finalSize);
 }
 
 SessionHandle SessionContext::GetHandle() const
@@ -915,9 +927,13 @@ Error SessionContext::DecryptUpdate(const Array<uint8_t>& data, CK_BYTE_PTR resu
         return ErrorEnum::eWrongState;
     }
 
+    LOG_DBG() << "Calling C_DecryptUpdate" << Log::Field("dataSize", data.Size());
+
     if (CK_RV rv
         = mFunctionList->C_DecryptUpdate(mHandle, const_cast<uint8_t*>(data.Get()), data.Size(), result, resultSize);
         rv != CKR_OK) {
+        LOG_ERR() << "C_DecryptUpdate failed" << Log::Field("rv", static_cast<int32_t>(rv));
+
         return static_cast<int32_t>(rv);
     }
 
