@@ -15,49 +15,44 @@ namespace aos::sm::imagemanager {
 namespace {
 
 // Adapts an open fs::File into a crypto::ChunkProviderItf, so the whole ciphertext file never needs to be
-// read into memory before decrypting it. buffer is allocator-owned by the caller (BlobDecryptor, which has
+// read into memory before decrypting it. Delivers exactly size bytes from the file's current position, so
+// trailing data (the GCM tag) is left out. buffer is allocator-owned by the caller (BlobDecryptor, which has
 // an AllocatorItf) rather than by this class itself: a chunk-sized (tens of KiB) buffer would blow the
 // stack budget on a stack-constrained target if it lived in a local variable instead.
 class FileChunkProvider : public crypto::ChunkProviderItf {
 public:
-    FileChunkProvider(fs::File& file, Array<uint8_t>& buffer)
+    FileChunkProvider(fs::File& file, Array<uint8_t>& buffer, size_t size)
         : mFile(file)
         , mBuffer(buffer)
+        , mRemaining(size)
     {
     }
 
     RetWithError<Array<uint8_t>> NextChunk() override
     {
-        if (mExhausted) {
+        if (mRemaining == 0) {
             return {Array<uint8_t>(), ErrorEnum::eEOF};
         }
 
-        if (auto err = mBuffer.Resize(mBuffer.MaxSize()); !err.IsNone()) {
+        Array<uint8_t> chunk(mBuffer.Get(), Min(mBuffer.MaxSize(), mRemaining));
+
+        if (auto err = mFile.ReadBlock(chunk); !err.IsNone() && !err.Is(ErrorEnum::eEOF)) {
             return {Array<uint8_t>(), AOS_ERROR_WRAP(err)};
         }
 
-        auto err = mFile.ReadBlock(mBuffer);
-        if (!err.IsNone() && !err.Is(ErrorEnum::eEOF)) {
-            return {Array<uint8_t>(), AOS_ERROR_WRAP(err)};
+        if (chunk.IsEmpty()) {
+            return {Array<uint8_t>(), AOS_ERROR_WRAP(Error(ErrorEnum::eFailed, "encrypted file ended prematurely"))};
         }
 
-        if (err.Is(ErrorEnum::eEOF)) {
-            mExhausted = true;
+        mRemaining -= chunk.Size();
 
-            // deliver this last chunk now if it still carries data; the following call reports eEOF
-            // with nothing left.
-            if (mBuffer.IsEmpty()) {
-                return {Array<uint8_t>(), ErrorEnum::eEOF};
-            }
-        }
-
-        return {mBuffer, ErrorEnum::eNone};
+        return {chunk, ErrorEnum::eNone};
     }
 
 private:
     fs::File&       mFile;
     Array<uint8_t>& mBuffer;
-    bool            mExhausted = false;
+    size_t          mRemaining;
 };
 
 // Adapts an open fs::File into a crypto::ChunkReceiverItf, so decrypted data is written out as the key
@@ -93,6 +88,8 @@ private:
  * Public
  **********************************************************************************************************************/
 
+constexpr uint8_t BlobDecryptor::cGCMPayloadCounterSuffix[];
+
 Error BlobDecryptor::Init(AllocatorItf& allocator, iamclient::CertProviderItf& certProvider,
     crypto::CertLoaderItf& certLoader, const String& certType)
 {
@@ -127,10 +124,8 @@ Error BlobDecryptor::Decrypt(const String& encryptedPath, const String& decrypte
             Error(ErrorEnum::eInvalidArgument, "encrypted file too short to contain an IV and a tag"));
     }
 
-    // plaintext can't be larger than the ciphertext it came from (GCM never expands data): this buffer is
-    // always big enough for whatever a single decrypt step releases. Most PKCS11 modules (SoftHSM2 included,
-    // verified empirically) only release the whole plaintext at the very end, once the authentication tag
-    // has been checked, so this can't be chunked the way the ciphertext side is.
+    // CTR releases exactly as much plaintext per C_DecryptUpdate as it is given ciphertext, so a buffer the
+    // size of one ciphertext chunk is always big enough for whatever a single decrypt step releases.
     auto plainBuf = mAllocator->Allocate(cDecryptChunkSize);
     if (!plainBuf) {
         return AOS_ERROR_WRAP(ErrorEnum::eNoMemory);
@@ -141,7 +136,7 @@ Error BlobDecryptor::Decrypt(const String& encryptedPath, const String& decrypte
     Array<uint8_t> plaintext(static_cast<uint8_t*>(plainBuf), cDecryptChunkSize);
 
     // staged to a deterministic sibling path and unconditionally removed, unless renamed into place on success
-    // below: decryptedPath itself is never touched unless the whole operation, including the tag check, succeeds.
+    // below: decryptedPath itself is never touched unless the whole operation succeeds.
     StaticString<cFilePathLen> stagedPath;
 
     if (auto err = stagedPath.Format("%s.gcmtmp", decryptedPath.CStr()); !err.IsNone()) {
@@ -152,16 +147,14 @@ Error BlobDecryptor::Decrypt(const String& encryptedPath, const String& decrypte
 
     fs::File output;
 
-    // owner-only: tokens that release plaintext before the tag is checked make it briefly hold unauthenticated
-    // data, which is only renamed into place once StreamDecrypt succeeds.
+    // owner-only: it holds plaintext while decryption is still in progress.
     if (auto err = output.Open(stagedPath, fs::File::Mode::WriteNew, 0600); !err.IsNone()) {
         return AOS_ERROR_WRAP(err);
     }
 
-    crypto::GCMDecryptionOptions gcmOptions;
-    FileChunkReceiver            chunkReceiver(output, plaintext);
+    FileChunkReceiver chunkReceiver(output, plaintext);
 
-    if (auto err = StreamDecrypt(*key, encryptedPath, gcmOptions, chunkReceiver); !err.IsNone()) {
+    if (auto err = StreamDecrypt(*key, encryptedPath, encryptedSize, chunkReceiver); !err.IsNone()) {
         return AOS_ERROR_WRAP(err);
     }
 
@@ -209,7 +202,7 @@ RetWithError<SharedPtr<crypto::PrivateKeyItf>> BlobDecryptor::FetchKey()
 }
 
 Error BlobDecryptor::StreamDecrypt(const crypto::PrivateKeyItf& key, const String& encryptedPath,
-    crypto::GCMDecryptionOptions& gcmOptions, crypto::ChunkReceiverItf& chunkReceiver) const
+    size_t encryptedSize, crypto::ChunkReceiverItf& chunkReceiver) const
 {
     fs::File input;
 
@@ -217,12 +210,28 @@ Error BlobDecryptor::StreamDecrypt(const crypto::PrivateKeyItf& key, const Strin
         return AOS_ERROR_WRAP(err);
     }
 
-    if (auto err = input.ReadBlock(gcmOptions.mIV); !err.IsNone() && !err.Is(ErrorEnum::eEOF)) {
+    StaticArray<uint8_t, crypto::AESCipherItf::cGCMIVSize> iv;
+
+    if (auto err = input.ReadBlock(iv); !err.IsNone() && !err.Is(ErrorEnum::eEOF)) {
         return AOS_ERROR_WRAP(err);
     }
 
-    if (gcmOptions.mIV.Size() != crypto::AESCipherItf::cGCMIVSize) {
+    if (iv.Size() != crypto::AESCipherItf::cGCMIVSize) {
         return AOS_ERROR_WRAP(Error(ErrorEnum::eInvalidArgument, "encrypted file too short to contain an IV"));
+    }
+
+    // GCM encrypts the payload with plain AES-CTR, starting from counter block IV || 0x00000002 (J0 + 1;
+    // J0 = IV || 0x00000001 itself is only used to encrypt the tag), so CTR decrypts it as is.
+    crypto::CTRDecryptionOptions ctrOptions;
+
+    if (auto err = ctrOptions.mCounter.Assign(iv); !err.IsNone()) {
+        return AOS_ERROR_WRAP(err);
+    }
+
+    for (const uint8_t byte : cGCMPayloadCounterSuffix) {
+        if (auto err = ctrOptions.mCounter.PushBack(byte); !err.IsNone()) {
+            return AOS_ERROR_WRAP(err);
+        }
     }
 
     // fixed-size chunk buffer, reused for every chunk read off disk: this is what keeps ciphertext-side
@@ -238,9 +247,11 @@ Error BlobDecryptor::StreamDecrypt(const crypto::PrivateKeyItf& key, const Strin
 
     Array<uint8_t> chunk(static_cast<uint8_t*>(chunkBuf), cDecryptChunkSize);
 
-    FileChunkProvider chunkProvider(input, chunk);
+    // the trailing tag is not passed on: CTR doesn't verify it.
+    FileChunkProvider chunkProvider(
+        input, chunk, encryptedSize - crypto::AESCipherItf::cGCMIVSize - crypto::AESCipherItf::cGCMTagSize);
 
-    return key.StreamDecrypt(chunkProvider, crypto::DecryptionOptions {gcmOptions}, chunkReceiver);
+    return key.StreamDecrypt(chunkProvider, crypto::DecryptionOptions {ctrOptions}, chunkReceiver);
 }
 
 } // namespace aos::sm::imagemanager

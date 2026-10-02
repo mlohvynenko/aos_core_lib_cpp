@@ -158,6 +158,13 @@ RetWithError<CK_MECHANISM> PCKS11RSAMechConverter::Visit(const crypto::GCMDecryp
     return {{}, AOS_ERROR_WRAP(ErrorEnum::eNotSupported)};
 }
 
+RetWithError<CK_MECHANISM> PCKS11RSAMechConverter::Visit(const crypto::CTRDecryptionOptions& options) const
+{
+    (void)options;
+
+    return {{}, AOS_ERROR_WRAP(ErrorEnum::eNotSupported)};
+}
+
 /***********************************************************************************************************************
  * PKCS11ECDSAPrivateKey
  **********************************************************************************************************************/
@@ -220,6 +227,18 @@ RetWithError<CK_MECHANISM> PKCS11AESMechConverter::Visit(const crypto::GCMDecryp
     return CK_MECHANISM {CKM_AES_GCM, &mGCMParams, sizeof(mGCMParams)};
 }
 
+RetWithError<CK_MECHANISM> PKCS11AESMechConverter::Visit(const crypto::CTRDecryptionOptions& options) const
+{
+    if (options.mCounter.Size() != sizeof(mCTRParams.cb)) {
+        return {{}, AOS_ERROR_WRAP(ErrorEnum::eInvalidArgument)};
+    }
+
+    mCTRParams.ulCounterBits = mCTRCounterBits;
+    memcpy(mCTRParams.cb, options.mCounter.Get(), sizeof(mCTRParams.cb));
+
+    return CK_MECHANISM {CKM_AES_CTR, &mCTRParams, sizeof(mCTRParams)};
+}
+
 /***********************************************************************************************************************
  * AESPrivateKey
  **********************************************************************************************************************/
@@ -249,27 +268,45 @@ Error AESPrivateKey::Sign(
 Error AESPrivateKey::Decrypt(
     const Array<uint8_t>& cipher, const crypto::DecryptionOptions& options, Array<uint8_t>& result) const
 {
-    PKCS11AESMechConverter visitor;
-
-    auto [mech, err] = options.ApplyVisitor(visitor);
-    if (!err.IsNone()) {
-        return AOS_ERROR_WRAP(err);
-    }
-
-    return mSession->Decrypt(&mech, mKeyHandle, cipher, result);
+    return WithMechanism(
+        options, [&](CK_MECHANISM& mech) { return mSession->Decrypt(&mech, mKeyHandle, cipher, result); });
 }
 
 Error AESPrivateKey::StreamDecrypt(crypto::ChunkProviderItf& chunkProvider, const crypto::DecryptionOptions& options,
     crypto::ChunkReceiverItf& chunkReceiver) const
 {
-    PKCS11AESMechConverter visitor;
+    return WithMechanism(options, [&](CK_MECHANISM& mech) {
+        return mSession->DecryptMultiPart(&mech, mKeyHandle, chunkProvider, chunkReceiver);
+    });
+}
+
+template <typename Op>
+Error AESPrivateKey::WithMechanism(const crypto::DecryptionOptions& options, Op op) const
+{
+    PKCS11AESMechConverter visitor(cCTRCounterBits);
 
     auto [mech, err] = options.ApplyVisitor(visitor);
     if (!err.IsNone()) {
         return AOS_ERROR_WRAP(err);
     }
 
-    return mSession->DecryptMultiPart(&mech, mKeyHandle, chunkProvider, chunkReceiver);
+    err = op(mech);
+
+    // C_DecryptInit rejects the parameters before any data is consumed, so retrying is safe here.
+    if (mech.mechanism == CKM_AES_CTR && err.Errno() == static_cast<int32_t>(CKR_MECHANISM_PARAM_INVALID)) {
+        LOG_DBG() << "Token rejected CTR counter bits, retrying" << Log::Field("counterBits", cOPTEECTRCounterBits);
+
+        PKCS11AESMechConverter fallbackVisitor(cOPTEECTRCounterBits);
+
+        Tie(mech, err) = options.ApplyVisitor(fallbackVisitor);
+        if (!err.IsNone()) {
+            return AOS_ERROR_WRAP(err);
+        }
+
+        err = op(mech);
+    }
+
+    return err;
 }
 
 } // namespace aos::pkcs11

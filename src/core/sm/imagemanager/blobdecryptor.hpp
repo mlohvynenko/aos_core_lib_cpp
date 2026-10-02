@@ -29,23 +29,27 @@ constexpr auto cDecryptChunkSize = AOS_CONFIG_IMAGEMANAGER_DECRYPT_CHUNK_SIZE;
  * certificate managed by IAM's cert module system (see certModules config), that cert module is dedicated
  * to locating the key (its registered key URL's token/library/PIN *and* id/label directly identify the
  * CKO_SECRET_KEY object), it is not used cryptographically itself. The key handle is resolved once, on
- * first use, and cached; the key's own value is never read - the actual AES-GCM decrypt call happens
- * through it (crypto::PrivateKeyItf::Decrypt with crypto::GCMDecryptionOptions), this class handles the
- * file I/O around that single in-memory call (splitting off the IV, staging output, renaming into place
- * once the authentication tag checks out). It is protected by the token's own access control (PIN/login)
- * the same way a certificate's private key is: both the key and the cert module are provisioned onto the
- * device's token out of band. Algorithm is fixed to AES-256-GCM: authenticated (a wrong key or a modified
- * blob is detected, not decrypted to garbage) and without padding. The IV (nonce) travels with the data
- * (first 12 bytes of the encrypted file) rather than being derived or exchanged separately, since only the
- * key itself needs to stay off the network. Encrypted file layout: IV (12 bytes) | ciphertext |
- * authentication tag (16 bytes).
+ * first use, and cached; the key's own value is never read - the actual decrypt call happens through it
+ * (crypto::PrivateKeyItf::StreamDecrypt), this class handles the file I/O around it (splitting off the IV,
+ * staging output, renaming into place once decryption succeeds). It is protected by the token's own access
+ * control (PIN/login) the same way a certificate's private key is: both the key and the cert module are
+ * provisioned onto the device's token out of band. Blobs are produced with AES-256-GCM; the IV (nonce)
+ * travels with the data (first 12 bytes of the encrypted file) rather than being derived or exchanged
+ * separately, since only the key itself needs to stay off the network. Encrypted file layout: IV (12 bytes) |
+ * ciphertext | authentication tag (16 bytes).
+ *
+ * The blob is decrypted with AES-256-CTR rather than AES-256-GCM: GCM's payload is plain CTR starting at
+ * counter block IV || 0x00000002, so the ciphertext decrypts the same way, but the tag is not checked. This
+ * is deliberate: TEE-backed PKCS11 modules (OP-TEE) hold the whole GCM plaintext in their limited TA heap
+ * until C_DecryptFinal verifies the tag, failing anything larger than that heap with CKR_DEVICE_MEMORY,
+ * while CTR streams with constant token memory. Integrity is instead guaranteed by the caller: the encrypted
+ * blob is validated against its manifest digest before it gets here, so a wrong key yields garbage (typically
+ * rejected when the gzip'd layer fails to unpack), not an error from Decrypt.
  *
  * Decrypt reads the ciphertext off disk in chunks via key->StreamDecrypt, rather than buffering the whole
  * file, so the token/key this class is Init'd with must support that (pkcs11::AESPrivateKey does; there is
- * no whole-buffer fallback here), and writes decrypted data to the staged output file as the key releases it.
- * The *plaintext* buffer is still sized for the whole file regardless: most
- * PKCS11 modules only release AEAD-decrypted data once the authentication tag has been verified, all at
- * once, so chunking only ever reduces the ciphertext-side memory footprint, not the plaintext side.
+ * no whole-buffer fallback here), and writes decrypted data to the staged output file as the key releases it,
+ * using a plaintext buffer the size of one ciphertext chunk.
  */
 class BlobDecryptor : public BlobDecryptorItf {
 public:
@@ -75,12 +79,15 @@ private:
     RetWithError<SharedPtr<crypto::PrivateKeyItf>> GetKey();
     RetWithError<SharedPtr<crypto::PrivateKeyItf>> FetchKey();
 
-    // Reads the encrypted file's IV, then decrypts the rest via key.StreamDecrypt, so the ciphertext
-    // never needs to be fully buffered in memory (see crypto::PrivateKeyItf::StreamDecrypt). Returns
-    // whatever error key.StreamDecrypt returns, including ErrorEnum::eNotSupported if the key/token
-    // doesn't support it - there is no whole-buffer fallback.
-    Error StreamDecrypt(const crypto::PrivateKeyItf& key, const String& encryptedPath,
-        crypto::GCMDecryptionOptions& gcmOptions, crypto::ChunkReceiverItf& chunkReceiver) const;
+    // Low 32 bits of the first CTR counter block of a GCM payload with a 96-bit IV: inc32(J0), J0 = IV || 1.
+    static constexpr uint8_t cGCMPayloadCounterSuffix[] = {0x00, 0x00, 0x00, 0x02};
+
+    // Reads the encrypted file's IV, then decrypts the ciphertext (excluding the trailing tag) via
+    // key.StreamDecrypt, so it never needs to be fully buffered in memory (see
+    // crypto::PrivateKeyItf::StreamDecrypt). Returns whatever error key.StreamDecrypt returns, including
+    // ErrorEnum::eNotSupported if the key/token doesn't support it - there is no whole-buffer fallback.
+    Error StreamDecrypt(const crypto::PrivateKeyItf& key, const String& encryptedPath, size_t encryptedSize,
+        crypto::ChunkReceiverItf& chunkReceiver) const;
 
     AllocatorItf*                    mAllocator {};
     Mutex                            mKeyMutex;
