@@ -259,8 +259,8 @@ Error AESPrivateKey::Decrypt(
     return mSession->Decrypt(&mech, mKeyHandle, cipher, result);
 }
 
-Error AESPrivateKey::StreamDecrypt(
-    crypto::ChunkProviderItf& chunkProvider, const crypto::DecryptionOptions& options, Array<uint8_t>& result) const
+Error AESPrivateKey::StreamDecrypt(crypto::ChunkProviderItf& chunkProvider, const crypto::DecryptionOptions& options,
+    crypto::ChunkReceiverItf& chunkReceiver) const
 {
     PKCS11AESMechConverter visitor;
 
@@ -269,7 +269,7 @@ Error AESPrivateKey::StreamDecrypt(
         return AOS_ERROR_WRAP(err);
     }
 
-    return mSession->DecryptMultiPart(&mech, mKeyHandle, chunkProvider, result);
+    return mSession->DecryptMultiPart(&mech, mKeyHandle, chunkProvider, chunkReceiver);
 }
 
 } // namespace aos::pkcs11

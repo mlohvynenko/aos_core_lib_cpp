@@ -32,7 +32,9 @@ public:
             return {Array<uint8_t>(), ErrorEnum::eEOF};
         }
 
-        (void)mBuffer.Resize(mBuffer.MaxSize());
+        if (auto err = mBuffer.Resize(mBuffer.MaxSize()); !err.IsNone()) {
+            return {Array<uint8_t>(), AOS_ERROR_WRAP(err)};
+        }
 
         auto err = mFile.ReadBlock(mBuffer);
         if (!err.IsNone() && !err.Is(ErrorEnum::eEOF)) {
@@ -56,6 +58,33 @@ private:
     fs::File&       mFile;
     Array<uint8_t>& mBuffer;
     bool            mExhausted = false;
+};
+
+// Adapts an open fs::File into a crypto::ChunkReceiverItf, so decrypted data is written out as the key
+// releases it instead of being collected in memory first. buffer is allocator-owned by the caller, for the
+// same reason as FileChunkProvider's.
+class FileChunkReceiver : public crypto::ChunkReceiverItf {
+public:
+    FileChunkReceiver(fs::File& file, Array<uint8_t>& buffer)
+        : mFile(file)
+        , mBuffer(buffer)
+    {
+    }
+
+    Array<uint8_t>& GetBuffer() override { return mBuffer; }
+
+    Error OnChunk(const Array<uint8_t>& chunk) override
+    {
+        if (auto err = mFile.WriteBlock(chunk); !err.IsNone()) {
+            return AOS_ERROR_WRAP(err);
+        }
+
+        return ErrorEnum::eNone;
+    }
+
+private:
+    fs::File&       mFile;
+    Array<uint8_t>& mBuffer;
 };
 
 } // namespace
@@ -98,28 +127,18 @@ Error BlobDecryptor::Decrypt(const String& encryptedPath, const String& decrypte
             Error(ErrorEnum::eInvalidArgument, "encrypted file too short to contain an IV and a tag"));
     }
 
-    // rest of the file: ciphertext followed by the 16-byte authentication tag, exactly as
-    // crypto::PrivateKeyItf::StreamDecrypt expects it.
-    auto cipherSize = encryptedSize - crypto::AESCipherItf::cGCMIVSize;
-
     // plaintext can't be larger than the ciphertext it came from (GCM never expands data): this buffer is
-    // always big enough, however much of it ends up filled in. Most PKCS11 modules (SoftHSM2 included,
+    // always big enough for whatever a single decrypt step releases. Most PKCS11 modules (SoftHSM2 included,
     // verified empirically) only release the whole plaintext at the very end, once the authentication tag
     // has been checked, so this can't be chunked the way the ciphertext side is.
-    auto plainBuf = mAllocator->Allocate(cipherSize);
+    auto plainBuf = mAllocator->Allocate(cDecryptChunkSize);
     if (!plainBuf) {
         return AOS_ERROR_WRAP(ErrorEnum::eNoMemory);
     }
 
     auto freePlain = DeferRelease(mAllocator, [&](AllocatorItf* allocator) { allocator->Free(plainBuf); });
 
-    Array<uint8_t> plaintext(static_cast<uint8_t*>(plainBuf), cipherSize);
-
-    crypto::GCMDecryptionOptions gcmOptions;
-
-    if (auto err = StreamDecrypt(*key, encryptedPath, gcmOptions, plaintext); !err.IsNone()) {
-        return AOS_ERROR_WRAP(err);
-    }
+    Array<uint8_t> plaintext(static_cast<uint8_t*>(plainBuf), cDecryptChunkSize);
 
     // staged to a deterministic sibling path and unconditionally removed, unless renamed into place on success
     // below: decryptedPath itself is never touched unless the whole operation, including the tag check, succeeds.
@@ -133,16 +152,17 @@ Error BlobDecryptor::Decrypt(const String& encryptedPath, const String& decrypte
 
     fs::File output;
 
-    // owner-only: it briefly holds plaintext that is already authenticated by this point, but stays private
-    // regardless.
+    // owner-only: tokens that release plaintext before the tag is checked make it briefly hold unauthenticated
+    // data, which is only renamed into place once StreamDecrypt succeeds.
     if (auto err = output.Open(stagedPath, fs::File::Mode::WriteNew, 0600); !err.IsNone()) {
         return AOS_ERROR_WRAP(err);
     }
 
-    if (!plaintext.IsEmpty()) {
-        if (auto err = output.WriteBlock(plaintext); !err.IsNone()) {
-            return AOS_ERROR_WRAP(err);
-        }
+    crypto::GCMDecryptionOptions gcmOptions;
+    FileChunkReceiver            chunkReceiver(output, plaintext);
+
+    if (auto err = StreamDecrypt(*key, encryptedPath, gcmOptions, chunkReceiver); !err.IsNone()) {
+        return AOS_ERROR_WRAP(err);
     }
 
     if (auto err = output.Close(); !err.IsNone()) {
@@ -189,7 +209,7 @@ RetWithError<SharedPtr<crypto::PrivateKeyItf>> BlobDecryptor::FetchKey()
 }
 
 Error BlobDecryptor::StreamDecrypt(const crypto::PrivateKeyItf& key, const String& encryptedPath,
-    crypto::GCMDecryptionOptions& gcmOptions, Array<uint8_t>& plaintext) const
+    crypto::GCMDecryptionOptions& gcmOptions, crypto::ChunkReceiverItf& chunkReceiver) const
 {
     fs::File input;
 
@@ -220,7 +240,7 @@ Error BlobDecryptor::StreamDecrypt(const crypto::PrivateKeyItf& key, const Strin
 
     FileChunkProvider chunkProvider(input, chunk);
 
-    return key.StreamDecrypt(chunkProvider, crypto::DecryptionOptions {gcmOptions}, plaintext);
+    return key.StreamDecrypt(chunkProvider, crypto::DecryptionOptions {gcmOptions}, chunkReceiver);
 }
 
 } // namespace aos::sm::imagemanager

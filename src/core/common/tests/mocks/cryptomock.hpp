@@ -43,7 +43,7 @@ public:
     MOCK_METHOD(Error, Decrypt,
         (const Array<uint8_t>& cipher, const DecryptionOptions& options, Array<uint8_t>& result), (const, override));
     MOCK_METHOD(Error, StreamDecrypt,
-        (ChunkProviderItf & chunkProvider, const DecryptionOptions& options, Array<uint8_t>& result),
+        (ChunkProviderItf & chunkProvider, const DecryptionOptions& options, ChunkReceiverItf& chunkReceiver),
         (const, override));
 };
 

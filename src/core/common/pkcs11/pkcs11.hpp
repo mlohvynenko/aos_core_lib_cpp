@@ -449,15 +449,16 @@ public:
     /**
      * Decrypts data supplied incrementally by chunkProvider using a multi-part PKCS11 operation, so
      * the whole ciphertext never needs to be held in memory at once. Whatever plaintext each
-     * C_DecryptUpdate/C_DecryptFinal call releases is appended to result as it comes back; many
-     * PKCS11 modules (SoftHSM2 included, verified empirically against CKM_AES_GCM) only release
-     * AEAD-decrypted data once the tag has been checked, at C_DecryptFinal, all at once - so result
-     * must have capacity for the whole plaintext regardless of how input was chunked.
+     * C_DecryptUpdate/C_DecryptFinal call releases is written into chunkReceiver's buffer and handed
+     * to chunkReceiver as it comes back; many PKCS11 modules (SoftHSM2 included, verified empirically
+     * against CKM_AES_GCM) only release AEAD-decrypted data once the tag has been checked, at
+     * C_DecryptFinal, all at once - so chunkReceiver's buffer must have capacity for the whole
+     * plaintext regardless of how input was chunked.
      *
      * @param mechanism mechanism used to decrypt.
      * @param privKey the handle of the private/secret key.
      * @param chunkProvider supplies ciphertext chunks (and owns their storage).
-     * @param[out] result decrypted data.
+     * @param chunkReceiver receives decrypted chunks (and owns their storage).
      * @return Error. If the very first C_DecryptUpdate call fails (nothing decrypted yet), this
      * returns ErrorEnum::eNotSupported: some PKCS11 modules don't support multi-part operations for
      * AEAD mechanisms at all, and only fail once actual data is pushed through, not at
@@ -465,7 +466,7 @@ public:
      * failure after that point is a real error (e.g. a bad tag), not a capability gap.
      */
     Error DecryptMultiPart(CK_MECHANISM_PTR mechanism, ObjectHandle privKey, crypto::ChunkProviderItf& chunkProvider,
-        Array<uint8_t>& result) const;
+        crypto::ChunkReceiverItf& chunkReceiver) const;
 
     /**
      * Returns session handle.
