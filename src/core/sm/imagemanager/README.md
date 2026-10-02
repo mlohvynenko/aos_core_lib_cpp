@@ -27,15 +27,19 @@ symmetric key that is never transmitted over the network.
   any other private key does.
 - The key is looked up lazily, the first time an encrypted layer is actually installed — a node with no
   key provisioned starts up normally and only fails when asked to install an encrypted layer.
-- Blobs are produced with AES-256-GCM, but the node decrypts them with **AES-256-CTR** and does **not**
-  check the authentication tag. GCM encrypts its payload with plain CTR, starting from counter block
-  `IV || 00 00 00 02`, so CTR decrypts the same ciphertext to the same plaintext. The reason is token
-  memory: OP-TEE's PKCS11 TA keeps the whole GCM plaintext in its TA heap until `C_DecryptFinal` has
-  verified the tag, so any blob larger than that heap (256 KiB on RPi) fails with `CKR_DEVICE_MEMORY`,
-  whereas CTR streams with constant token memory. Integrity comes from the blob digest instead: the
-  encrypted blob is checked against its manifest `ContentDescriptor` digest right after download, before
-  it is decrypted. A wrong key therefore doesn't fail decryption: it yields garbage, which then fails to
-  unpack. No padding is involved either way (PKCS7 only applies to CBC).
+- The algorithm is AES-256-GCM: authenticated encryption, so a wrong key or a modified blob is detected
+  and rejected instead of decrypting to garbage. GCM is a stream mode, so no padding is involved (PKCS7
+  only applies to CBC).
+- The node doesn't use `CKM_AES_GCM` for it, though: OP-TEE's PKCS11 TA keeps the whole GCM plaintext in
+  its TA heap until `C_DecryptFinal` has verified the tag, so any blob larger than that heap (256 KiB on
+  RPi) fails with `CKR_DEVICE_MEMORY`. Instead, the payload is decrypted on the token with
+  **`CKM_AES_CTR`**, which streams with constant token memory — GCM encrypts its payload with plain CTR
+  starting from counter block `IV || 00 00 00 02`, so CTR yields the same plaintext — and the tag is
+  verified in software as `tag = AES_K(J0) ⊕ GHASH_H(ciphertext)`, with `J0 = IV || 00 00 00 01`. The two
+  key-dependent values, `H = AES_K(0¹²⁸)` and `AES_K(J0)`, are CTR keystream blocks obtained from the token
+  by CTR-decrypting a zero block, so the key needs nothing beyond `CKA_DECRYPT`. They don't reveal the key,
+  but would allow forging a tag for that IV; they only live in the node process's memory during one
+  decryption, where an attacker able to read them could equally tamper with the output itself.
 - The IV (nonce) is not derived or coordinated separately: it travels with the data as the first 12 bytes
   of the encrypted blob (see `aos::sm::imagemanager::BlobDecryptor`). Producing an encrypted blob therefore
   needs no synchronization with the device beyond knowing the AES key. Use a fresh random IV for every
@@ -141,10 +145,12 @@ file) is the manifest `ContentDescriptor` digest.
    `CKO_PRIVATE_KEY`/`CKO_PUBLIC_KEY` matching) and, if found, wraps it as an `aos::pkcs11::AESPrivateKey`.
    The resulting `aos::crypto::PrivateKeyItf` handle is cached after the first lookup. There is no separate
    key-provider class: this all lives directly in `BlobDecryptor`, since nothing else needs the key.
-3. `Decrypt` reads the IV (first 12 bytes) and then decrypts the ciphertext (everything up to, but not
-   including, the 16-byte authentication tag) via `key->StreamDecrypt` with `crypto::CTRDecryptionOptions`
-   (initial counter block `IV || 00 00 00 02`) — there is no whole-buffer fallback, so the key/token this
-   class is used with must support it (`pkcs11::AESPrivateKey` does):
+3. `Decrypt` reads the IV (first 12 bytes), gets `H` from the token, decrypts the ciphertext (everything up
+   to, but not including, the 16-byte authentication tag) via `key->StreamDecrypt` with
+   `crypto::CTRDecryptionOptions` (initial counter block `IV || 00 00 00 02`) while computing GHASH over it,
+   and finally gets `AES_K(J0)` and compares the expected tag with the stored one in constant time. There is
+   no whole-buffer fallback, so the key/token this class is used with must support streaming
+   (`pkcs11::AESPrivateKey` does):
    - `StreamDecrypt` reads the file in `cDecryptChunkSize` chunks (a `crypto::ChunkProviderItf` wrapping the
      open file) and feeds them into `AESPrivateKey::StreamDecrypt`, which runs a multi-part PKCS11
      `CKM_AES_CTR` / `C_DecryptUpdate`+`C_DecryptFinal` operation (`pkcs11::SessionContext::DecryptMultiPart`)
@@ -170,8 +176,10 @@ file) is the manifest `ContentDescriptor` digest.
      at that chunk size. If "not supported" ever recurs in practice, check the real `CK_RV` before assuming
      it's a genuine capability gap rather than `cDecryptChunkSize` still being too large for that target;
    - either way, the key's own value is never read by this code — only PKCS11 operations run on the token;
-   - output is staged to a temporary file and only put in place once decryption fully succeeds; on any
-     failure the staged output is deleted, so partial plaintext is never left on disk.
+   - output is staged to a temporary file and only put in place once decryption, including the
+     authentication tag check, fully succeeds. If the tag doesn't match — wrong key, modified or
+     truncated blob — `Decrypt` fails with `ErrorEnum::eInvalidChecksum` and the staged output is deleted,
+     so unauthenticated plaintext is never left on disk.
 4. The result is the plaintext gzip'd tar, unpacked normally like any other layer.
 
 This is separate from `CryptoHelperItf::Decrypt`, which still handles the cloud-delivered blobs handled by
@@ -182,9 +190,8 @@ in-process rather than one kept non-extractable on a token.
 ### Manually verifying an encrypted blob
 
 Useful when a layer fails to install and you want to check, independently of the running node, whether
-the `.enc` file and the key provisioned to the device actually match. The node itself doesn't check the GCM
-tag (see "Design" above), but doing it here makes this unambiguous: with the wrong key or a damaged file,
-decryption fails with an authentication error instead of producing garbage.
+the `.enc` file and the key provisioned to the device actually match. GCM makes this unambiguous: with the
+wrong key or a damaged file decryption fails with an authentication error instead of producing garbage.
 
 The key is provisioned non-extractable, so it can no longer be read back off the token (`--read-object`
 fails by design, the same as it would for the cert module's own private key) — use your own secrets-store

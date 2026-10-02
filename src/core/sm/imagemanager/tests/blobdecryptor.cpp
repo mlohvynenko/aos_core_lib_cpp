@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <filesystem>
 #include <fstream>
+#include <functional>
 #include <iterator>
 #include <string>
 #include <vector>
@@ -34,6 +35,7 @@ namespace {
 constexpr auto cTestDir  = "/tmp/blobdecryptor_test";
 constexpr auto cIVLen    = crypto::AESCipherItf::cGCMIVSize;
 constexpr auto cTagLen   = crypto::AESCipherItf::cGCMTagSize;
+constexpr auto cBlockLen = crypto::AESCipherItf::cBlockSize;
 constexpr auto cCertType = "diskencryption";
 // the id/label embedded in this URL are what LoadPrivKeyByURL uses to resolve the layer key itself: this
 // "diskencryption" cert module is dedicated to pointing at it, not at a real TLS keypair.
@@ -90,6 +92,34 @@ Action<RetWithError<SharedPtr<crypto::PrivateKeyItf>>(const String&)> ReturnKey(
 {
     return Invoke([key](const String&) -> RetWithError<SharedPtr<crypto::PrivateKeyItf>> {
         return {key, ErrorEnum::eNone};
+    });
+}
+
+Bytes TagOf(const Bytes& blob)
+{
+    return Bytes(blob.end() - cTagLen, blob.end());
+}
+
+// Mocks the keystream blocks BlobDecryptor gets from the key to verify the tag: H = AES_K(0^128) is returned
+// as zero, which makes GHASH zero for any ciphertext, so the expected tag is exactly the block returned for
+// J0 = IV || 0x00000001.
+Action<Error(const Array<uint8_t>&, const crypto::DecryptionOptions&, Array<uint8_t>&)> ReturnKeystream(
+    const Bytes& iv, const Bytes& j0Block)
+{
+    return Invoke([iv, j0Block](const Array<uint8_t>& cipher, const crypto::DecryptionOptions& options,
+                      Array<uint8_t>& result) -> Error {
+        const auto& counter = options.GetValue<crypto::CTRDecryptionOptions>().mCounter;
+        const auto  j0      = Concat(iv, Bytes {0x00, 0x00, 0x00, 0x01});
+
+        EXPECT_EQ(cipher, Array<uint8_t>(Bytes(cBlockLen, 0).data(), cBlockLen));
+
+        if (std::all_of(counter.begin(), counter.end(), [](uint8_t byte) { return byte == 0; })) {
+            return result.Resize(cBlockLen, 0);
+        }
+
+        EXPECT_EQ(counter, Array<uint8_t>(j0.data(), j0.size()));
+
+        return result.Assign(Array<uint8_t>(j0Block.data(), j0Block.size()));
     });
 }
 
@@ -171,6 +201,7 @@ TEST_F(BlobDecryptorTest, SplitsIVAndTagAndStreamsCipherToKey)
 
             return {mKey, ErrorEnum::eNone};
         }));
+    EXPECT_CALL(*mKey, Decrypt(_, _, _)).Times(2).WillRepeatedly(ReturnKeystream(iv, tag));
 
     // verify the CTR counter starts where GCM's payload keystream does (IV || 0x00000002) and, by draining
     // chunkProvider entirely, that exactly the ciphertext (without the trailing tag) reaches the key intact,
@@ -245,11 +276,16 @@ TEST_F(BlobDecryptorTest, LoadKeyFailureIsReturned)
 
 TEST_F(BlobDecryptorTest, KeyIsCachedAfterFirstFetch)
 {
-    WriteBytes(mEncryptedPath, Pattern(cIVLen + cTagLen, 7));
+    const auto blob = Pattern(cIVLen + cTagLen, 7);
+
+    WriteBytes(mEncryptedPath, blob);
 
     EXPECT_CALL(mCertProvider, GetCert(_, _, _, _)).Times(1).WillOnce(ReturnCert(cKeyURL));
     EXPECT_CALL(mCertLoader, LoadPrivKeyByURL(_)).Times(1).WillOnce(ReturnKey(mKey));
     EXPECT_CALL(*mKey, StreamDecrypt(_, _, _)).Times(2).WillRepeatedly(Return(ErrorEnum::eNone));
+    EXPECT_CALL(*mKey, Decrypt(_, _, _))
+        .Times(4)
+        .WillRepeatedly(ReturnKeystream(Bytes(blob.begin(), blob.begin() + cIVLen), TagOf(blob)));
 
     ASSERT_TRUE(mDecryptor.Decrypt(mEncryptedPath.c_str(), mDecryptedPath.c_str()).IsNone());
     ASSERT_TRUE(mDecryptor.Decrypt(mEncryptedPath.c_str(), mDecryptedPath.c_str()).IsNone());
@@ -257,13 +293,18 @@ TEST_F(BlobDecryptorTest, KeyIsCachedAfterFirstFetch)
 
 TEST_F(BlobDecryptorTest, GetCertFailureIsNotCachedAndIsRetried)
 {
-    WriteBytes(mEncryptedPath, Pattern(cIVLen + cTagLen, 8));
+    const auto blob = Pattern(cIVLen + cTagLen, 8);
+
+    WriteBytes(mEncryptedPath, blob);
 
     EXPECT_CALL(mCertProvider, GetCert(_, _, _, _))
         .WillOnce(Return(ErrorEnum::eNotFound))
         .WillOnce(ReturnCert(cKeyURL));
     EXPECT_CALL(mCertLoader, LoadPrivKeyByURL(_)).WillOnce(ReturnKey(mKey));
     EXPECT_CALL(*mKey, StreamDecrypt(_, _, _)).WillOnce(Return(ErrorEnum::eNone));
+    EXPECT_CALL(*mKey, Decrypt(_, _, _))
+        .Times(2)
+        .WillRepeatedly(ReturnKeystream(Bytes(blob.begin(), blob.begin() + cIVLen), TagOf(blob)));
 
     EXPECT_TRUE(mDecryptor.Decrypt(mEncryptedPath.c_str(), mDecryptedPath.c_str()).Is(ErrorEnum::eNotFound));
     ASSERT_TRUE(mDecryptor.Decrypt(mEncryptedPath.c_str(), mDecryptedPath.c_str()).IsNone());
@@ -287,6 +328,7 @@ TEST_F(BlobDecryptorTest, KeyDecryptFailureIsReturnedAndLeavesNoOutput)
 
     EXPECT_CALL(mCertProvider, GetCert(_, _, _, _)).WillOnce(ReturnCert(cKeyURL));
     EXPECT_CALL(mCertLoader, LoadPrivKeyByURL(_)).WillOnce(ReturnKey(mKey));
+    EXPECT_CALL(*mKey, Decrypt(_, _, _)).WillOnce(ReturnKeystream({}, {}));
     EXPECT_CALL(*mKey, StreamDecrypt(_, _, _)).WillOnce(Return(ErrorEnum::eInvalidChecksum));
 
     EXPECT_TRUE(mDecryptor.Decrypt(mEncryptedPath.c_str(), mDecryptedPath.c_str()).Is(ErrorEnum::eInvalidChecksum));
@@ -303,9 +345,63 @@ TEST_F(BlobDecryptorTest, StreamDecryptNotSupportedIsReturnedWithoutFallingBack)
     // Some PKCS11 modules don't support multi-part CKM_AES_GCM operations at all: StreamDecrypt reports
     // that as ErrorEnum::eNotSupported. BlobDecryptor has no whole-buffer fallback, so this must be
     // returned as-is - key->Decrypt (StrictMock) is never reached.
+    EXPECT_CALL(*mKey, Decrypt(_, _, _)).WillOnce(ReturnKeystream({}, {}));
     EXPECT_CALL(*mKey, StreamDecrypt(_, _, _)).WillOnce(Return(ErrorEnum::eNotSupported));
 
     EXPECT_TRUE(mDecryptor.Decrypt(mEncryptedPath.c_str(), mDecryptedPath.c_str()).Is(ErrorEnum::eNotSupported));
+    EXPECT_FALSE(std::filesystem::exists(mDecryptedPath));
+}
+
+TEST_F(BlobDecryptorTest, KeystreamFailureIsReturnedWithoutDecrypting)
+{
+    WriteBytes(mEncryptedPath, Pattern(cIVLen + cTagLen, 16));
+
+    EXPECT_CALL(mCertProvider, GetCert(_, _, _, _)).WillOnce(ReturnCert(cKeyURL));
+    EXPECT_CALL(mCertLoader, LoadPrivKeyByURL(_)).WillOnce(ReturnKey(mKey));
+
+    // H can't be obtained: StreamDecrypt (StrictMock) is never reached.
+    EXPECT_CALL(*mKey, Decrypt(_, _, _)).WillOnce(Return(ErrorEnum::eFailed));
+
+    EXPECT_TRUE(mDecryptor.Decrypt(mEncryptedPath.c_str(), mDecryptedPath.c_str()).Is(ErrorEnum::eFailed));
+    EXPECT_FALSE(std::filesystem::exists(mDecryptedPath));
+}
+
+TEST_F(BlobDecryptorTest, TagMismatchIsRejectedAndLeavesNoOutput)
+{
+    const auto blob = Pattern(cIVLen + cTagLen, 17);
+    auto       tag  = TagOf(blob);
+
+    tag[0] ^= 0x01;
+
+    WriteBytes(mEncryptedPath, blob);
+
+    EXPECT_CALL(mCertProvider, GetCert(_, _, _, _)).WillOnce(ReturnCert(cKeyURL));
+    EXPECT_CALL(mCertLoader, LoadPrivKeyByURL(_)).WillOnce(ReturnKey(mKey));
+    EXPECT_CALL(*mKey, StreamDecrypt(_, _, _)).WillOnce(Return(ErrorEnum::eNone));
+    EXPECT_CALL(*mKey, Decrypt(_, _, _))
+        .Times(2)
+        .WillRepeatedly(ReturnKeystream(Bytes(blob.begin(), blob.begin() + cIVLen), tag));
+
+    EXPECT_TRUE(mDecryptor.Decrypt(mEncryptedPath.c_str(), mDecryptedPath.c_str()).Is(ErrorEnum::eInvalidChecksum));
+    EXPECT_FALSE(std::filesystem::exists(mDecryptedPath));
+}
+
+TEST_F(BlobDecryptorTest, CiphertextNotFullyConsumedIsRejected)
+{
+    const auto blob = Pattern(cIVLen + 100 + cTagLen, 18);
+
+    WriteBytes(mEncryptedPath, blob);
+
+    EXPECT_CALL(mCertProvider, GetCert(_, _, _, _)).WillOnce(ReturnCert(cKeyURL));
+    EXPECT_CALL(mCertLoader, LoadPrivKeyByURL(_)).WillOnce(ReturnKey(mKey));
+    EXPECT_CALL(*mKey, Decrypt(_, _, _))
+        .WillRepeatedly(ReturnKeystream(Bytes(blob.begin(), blob.begin() + cIVLen), TagOf(blob)));
+
+    // a key that reports success without draining chunkProvider: the tag must not be checked against only
+    // part of the ciphertext.
+    EXPECT_CALL(*mKey, StreamDecrypt(_, _, _)).WillOnce(Return(ErrorEnum::eNone));
+
+    EXPECT_FALSE(mDecryptor.Decrypt(mEncryptedPath.c_str(), mDecryptedPath.c_str()).IsNone());
     EXPECT_FALSE(std::filesystem::exists(mDecryptedPath));
 }
 
@@ -540,9 +636,7 @@ TEST_F(BlobDecryptorRoundTripTest, DecryptsBlobProducedByAnIndependentGCMImpleme
     EXPECT_EQ(ReadBytes(mDecryptedPath), plain);
 }
 
-// The tag isn't verified (see BlobDecryptor): integrity is the manifest digest's job. These pin that
-// behavior down, so that a change in it is a deliberate one.
-TEST_F(BlobDecryptorRoundTripTest, WrongKeyDecryptsToGarbage)
+TEST_F(BlobDecryptorRoundTripTest, WrongKeyIsRejectedAndLeavesNoOutput)
 {
     const auto key   = Pattern(32, 30);
     const auto plain = Pattern(1000, 33);
@@ -553,15 +647,11 @@ TEST_F(BlobDecryptorRoundTripTest, WrongKeyDecryptsToGarbage)
 
     ASSERT_NO_FATAL_FAILURE(Encrypt(key, Pattern(cIVLen, 32), plain, blob));
 
-    ASSERT_TRUE(DecryptBlob(blob).IsNone());
-
-    const auto decrypted = ReadBytes(mDecryptedPath);
-
-    EXPECT_EQ(decrypted.size(), plain.size());
-    EXPECT_NE(decrypted, plain);
+    EXPECT_TRUE(DecryptBlob(blob).Is(ErrorEnum::eInvalidChecksum));
+    EXPECT_FALSE(std::filesystem::exists(mDecryptedPath));
 }
 
-TEST_F(BlobDecryptorRoundTripTest, TagIsNotVerified)
+TEST_F(BlobDecryptorRoundTripTest, ModifiedBlobIsRejectedAndLeavesNoOutput)
 {
     const auto key   = Pattern(32, 40);
     const auto plain = Pattern(1000, 42);
@@ -572,10 +662,33 @@ TEST_F(BlobDecryptorRoundTripTest, TagIsNotVerified)
 
     ASSERT_NO_FATAL_FAILURE(Encrypt(key, Pattern(cIVLen, 41), plain, blob));
 
-    blob.back() ^= 0x01;
+    struct Case {
+        const char*                 mName;
+        std::function<void(Bytes&)> mModify;
+    };
 
-    ASSERT_TRUE(DecryptBlob(blob).IsNone());
-    EXPECT_EQ(ReadBytes(mDecryptedPath), plain);
+    const std::vector<Case> cases {
+        {"IV", [](Bytes& b) { b[0] ^= 0x01; }},
+        {"first ciphertext byte", [](Bytes& b) { b[cIVLen] ^= 0x01; }},
+        {"ciphertext in the middle", [](Bytes& b) { b[b.size() / 2] ^= 0x80; }},
+        {"last ciphertext byte", [](Bytes& b) { b[b.size() - cTagLen - 1] ^= 0x01; }},
+        {"tag", [](Bytes& b) { b[b.size() - 1] ^= 0x01; }},
+        {"truncated by one byte", [](Bytes& b) { b.pop_back(); }},
+        {"extra trailing byte", [](Bytes& b) { b.push_back(0); }},
+    };
+
+    for (const auto& test : cases) {
+        SCOPED_TRACE(test.mName);
+
+        auto modified = blob;
+
+        test.mModify(modified);
+
+        std::filesystem::remove(mDecryptedPath);
+
+        EXPECT_TRUE(DecryptBlob(modified).Is(ErrorEnum::eInvalidChecksum));
+        EXPECT_FALSE(std::filesystem::exists(mDecryptedPath)) << "unauthenticated plaintext was left behind";
+    }
 }
 
 TEST_F(BlobDecryptorRoundTripTest, BlobWithoutRoomForTagIsRejected)
