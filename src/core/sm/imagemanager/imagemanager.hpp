@@ -142,7 +142,7 @@ private:
     Error CreateLayerMetadata(const String& path, size_t size, spaceallocator::SpaceItf* space);
     Error UnpackLayer(const String& path, const oci::ContentDescriptor& descriptor, const String& diffDigest);
     Error InstallLayer(const oci::ContentDescriptor& descriptor, const String& diffDigest, InstallItem& installItem);
-    Error DecryptBlob(const String& path, const String& diffDigest);
+    Error DecryptBlob(const String& path, size_t size);
     Error GetBlobURL(const String& digest, String& url) const;
     void  ReleaseSpace(const String& path, spaceallocator::SpaceItf* space, const Error& err);
     Error WaitForInstallingBlob(const String& digest);

@@ -9,6 +9,7 @@
 
 #include <core/common/config.hpp>
 #include <core/common/crypto/itf/certloader.hpp>
+#include <core/common/crypto/itf/rand.hpp>
 #include <core/common/iamclient/itf/certprovider.hpp>
 #include <core/common/tools/thread.hpp>
 
@@ -31,8 +32,8 @@ constexpr auto cDecryptChunkSize = AOS_CONFIG_IMAGEMANAGER_DECRYPT_CHUNK_SIZE;
  * CKO_SECRET_KEY object), it is not used cryptographically itself. The key handle is resolved once, on
  * first use, and cached; the key's own value is never read - the actual decrypt call happens through it
  * (crypto::PrivateKeyItf::StreamDecrypt), this class handles the file I/O around it (splitting off the IV,
- * staging output, renaming into place once the authentication tag checks out). It is protected by the token's own access
- * control (PIN/login) the same way a certificate's private key is: both the key and the cert module are
+ * staging output, renaming into place once the authentication tag checks out). It is protected by the token's own
+ * access control (PIN/login) the same way a certificate's private key is: both the key and the cert module are
  * provisioned onto the device's token out of band. Blobs are produced with AES-256-GCM; the IV (nonce)
  * travels with the data (first 12 bytes of the encrypted file) rather than being derived or exchanged
  * separately, since only the key itself needs to stay off the network. Encrypted file layout: IV (12 bytes) |
@@ -63,11 +64,12 @@ public:
      * @param allocator allocator used for the plaintext buffer and the ciphertext chunk buffer.
      * @param certProvider provider of a certificate that identifies the token/id/label to read the key from.
      * @param certLoader loader used to resolve the token's session and read the secret key object.
+     * @param random random generator used to give each staged output file a unique name.
      * @param certType certificate type/module id to fetch from certProvider.
      * @return Error.
      */
     Error Init(AllocatorItf& allocator, iamclient::CertProviderItf& certProvider, crypto::CertLoaderItf& certLoader,
-        const String& certType);
+        crypto::RandomItf& random, const String& certType);
 
     /**
      * Decrypts a blob file using the device-local symmetric key.
@@ -95,6 +97,7 @@ private:
     Mutex                            mKeyMutex;
     iamclient::CertProviderItf*      mCertProvider {};
     crypto::CertLoaderItf*           mCertLoader {};
+    crypto::RandomItf*               mRandom {};
     StaticString<cCertTypeLen>       mCertType;
     SharedPtr<crypto::PrivateKeyItf> mKey;
 };

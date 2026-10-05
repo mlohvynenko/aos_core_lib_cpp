@@ -27,7 +27,9 @@ public:
      * output, if the data doesn't authenticate (wrong key or modified blob).
      *
      * @param encryptedPath path to the encrypted file (IV, ciphertext, authentication tag).
-     * @param decryptedPath path where the decrypted file will be written.
+     * @param decryptedPath path where the decrypted file will be written. May be encryptedPath itself: the
+     * output is staged and only renamed into place, atomically replacing whatever is there, once it is
+     * authenticated.
      * @return Error.
      */
     virtual Error Decrypt(const String& encryptedPath, const String& decryptedPath) = 0;

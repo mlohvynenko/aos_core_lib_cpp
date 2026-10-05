@@ -48,6 +48,24 @@ Error AddPathIfNotExist(Array<StaticString<cFilePathLen>>& list, const String& p
     return list.PushBack(path);
 }
 
+// A blob is in use if it's one of usedBlobs or a file staged next to one of them (<blob>.<suffix>, e.g. a blob
+// being decrypted in place): such a stage must not be removed while its blob is still being installed.
+bool IsUsedBlob(const Array<StaticString<cFilePathLen>>& usedBlobs, const String& path)
+{
+    for (const auto& usedBlob : usedBlobs) {
+        if (path == usedBlob) {
+            return true;
+        }
+
+        if (path.Size() > usedBlob.Size() && path[usedBlob.Size()] == '.'
+            && strncmp(path.CStr(), usedBlob.CStr(), usedBlob.Size()) == 0) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
 } // namespace
 
 /***********************************************************************************************************************
@@ -693,27 +711,38 @@ Error ImageManager::UnpackLayer(const String& path, const oci::ContentDescriptor
     return ErrorEnum::eNone;
 }
 
-Error ImageManager::DecryptBlob(const String& path, const String& diffDigest)
+Error ImageManager::DecryptBlob(const String& path, size_t size)
 {
-    LOG_DBG() << "Decrypt blob" << Log::Field("path", path) << Log::Field("diffDigest", diffDigest);
+    LOG_DBG() << "Decrypt blob" << Log::Field("path", path) << Log::Field("size", size);
 
-    StaticString<cFilePathLen> decryptedPath;
+    // the decrypted output is staged next to the still present encrypted blob, so both exist at once until the
+    // staged file replaces the blob: reserve room for it. Once replaced, the plaintext (never larger than the
+    // ciphertext) fits in the blob's own, already accepted, reservation, so this one is always released.
+    UniquePtr<spaceallocator::SpaceItf> space;
 
-    if (auto err = decryptedPath.Format("%s.dec", path.CStr()); !err.IsNone()) {
-        return AOS_ERROR_WRAP(err);
+    if (size) {
+        Error err;
+
+        Tie(space, err) = mSpaceAllocator->AllocateSpace(size);
+        if (!err.IsNone()) {
+            return AOS_ERROR_WRAP(err);
+        }
     }
 
-    if (auto err = mBlobDecryptor->Decrypt(path, decryptedPath); !err.IsNone()) {
-        return err;
-    }
+    auto releaseSpace = DeferRelease(&space, [](const UniquePtr<spaceallocator::SpaceItf>* stagingSpace) {
+        if (!*stagingSpace) {
+            return;
+        }
 
-    auto cleanUpDecrypted = DeferRelease(&decryptedPath, [](const auto* path) { (void)fs::Remove(*path); });
+        if (auto err = (*stagingSpace)->Release(); !err.IsNone()) {
+            LOG_ERR() << "Can't release staging space" << Log::Field(AOS_ERROR_WRAP(err));
+        }
+    });
 
-    if (auto err = fs::Rename(decryptedPath, path); !err.IsNone()) {
-        return AOS_ERROR_WRAP(err);
-    }
-
-    return ErrorEnum::eNone;
+    // decrypted straight over the blob: BlobDecryptor stages the output and only renames it into place once it is
+    // authenticated, so there is no intermediate plaintext file of a fixed name to leave behind. A stage left by a
+    // crash is removed with the other orphans in the blobs folder.
+    return mBlobDecryptor->Decrypt(path, path);
 }
 
 Error ImageManager::InstallLayer(
@@ -779,7 +808,7 @@ Error ImageManager::InstallLayer(
     auto unpackDescriptor = descriptor;
 
     if (unpackDescriptor.mMediaType == oci::cMediaTypeLayerTarGZipEncrypted) {
-        err = DecryptBlob(path, diffDigest);
+        err = DecryptBlob(path, descriptor.mSize);
         if (!err.IsNone()) {
             return err;
         }
@@ -1424,7 +1453,7 @@ RetWithError<size_t> ImageManager::RemoveOrphanBlobs(const Array<StaticString<cF
         while (blobIterator.Next()) {
             auto blobPath = fs::JoinPath(blobsPath, blobIterator->mPath);
 
-            if (auto it = usedBlobs.Find(blobPath); it != usedBlobs.end()) {
+            if (IsUsedBlob(usedBlobs, blobPath)) {
                 continue;
             }
 

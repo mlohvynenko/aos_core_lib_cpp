@@ -76,8 +76,11 @@ pkcs11-tool --module /usr/lib/softhsm/libsofthsm2.so --token-label <token-label>
   -p "$(cat /var/aos/iam/.usrpin)" --delete-object --type secrkey --id <id> --label <label>
 pkcs11-tool --module /usr/lib/softhsm/libsofthsm2.so --token-label <token-label> \
   -p "$(cat /var/aos/iam/.usrpin)" --write-object layerkey.bin --type secrkey --key-type AES:32 \
-  --id <id> --label <label> --private --sensitive
+  --id <id> --label <label> --private --sensitive --usage-decrypt
 ```
+
+`--usage-decrypt` sets `CKA_DECRYPT`: the node only ever decrypts with this key, and a token whose default
+for that attribute is false would otherwise accept the key at lookup but reject every decrypt.
 
 **`--id` is not optional, and pkcs11-tool won't warn you if you forget it**: omitted, the object gets no
 `CKA_ID` at all (SoftHSM does not generate one), and `FindPrivateKey`'s lookup filters on `CKA_ID` as well
@@ -157,26 +160,26 @@ file) is the manifest `ContentDescriptor` digest.
      — so the ciphertext never needs to be fully buffered in memory. Each `C_DecryptUpdate` releases as much
      plaintext as it was given ciphertext, handed back through a `crypto::ChunkReceiverItf` (wrapping the
      staged output file) and written out straight away, so the plaintext buffer is one chunk too.
-   - `AESPrivateKey` first passes `ulCounterBits = 128` (the whole block is the counter, as PKCS#11 defines
-     it). OP-TEE's PKCS11 TA (checked against 4.2.0) misreads that field and rejects anything but `1` with
-     `CKR_MECHANISM_PARAM_INVALID` at `C_DecryptInit`, while incrementing the full 128-bit block anyway; on
-     that error `AESPrivateKey` retries with `1`. Nothing has been consumed at that point, so the retry is
-     safe.
+   - `AESPrivateKey` uses `ulCounterBits = 128` (the whole block is the counter, as PKCS#11 defines it).
+     OP-TEE's PKCS11 TA (checked against 4.2.0) misreads that field and rejects anything but `1` with
+     `CKR_MECHANISM_PARAM_INVALID`, while incrementing the full 128-bit block anyway. So on first use, before
+     any blob data is consumed, the key probes the token with a single-block decrypt using `128`; if that is
+     rejected, it runs a known-answer check that the token really carries the counter across the whole block
+     with `1` (a spec-compliant token would treat it as a 1-bit counter and silently produce wrong plaintext)
+     and then uses `1`. A token failing the check gets `ErrorEnum::eNotSupported`. The chosen width is
+     cached per key.
    - `cDecryptChunkSize` (`AOS_CONFIG_IMAGEMANAGER_DECRYPT_CHUNK_SIZE`, default 16 KiB) is deliberately
      smaller than the generic `cFileChunkSize` (64 KiB): empirically, a TEE-backed PKCS11 module (OP-TEE's
      `libckteec`) rejects a single `C_DecryptUpdate` call above ~34 KiB with `CKR_DEVICE_MEMORY` - its
      shared-memory budget, not a mechanism-support limit. Override this constant per platform if a target's
      PKCS11 module is known to allow more (or needs less).
-   - if the very first `C_DecryptUpdate` call fails, `DecryptMultiPart` reports `ErrorEnum::eNotSupported`
-     regardless of the underlying `CK_RV`, on the assumption that a module rejecting multi-part AEAD at all
-     only does so once data is actually pushed through, not at `C_DecryptInit`. This conflates that case
-     with any other first-chunk failure, including a chunk that's simply too large
-     (`CKR_DEVICE_MEMORY`) — confirmed empirically: with `cFileChunkSize` (64 KiB) this misreported as
-     "not supported" on a real device whose token actually supports multi-part decryption fine, just not
-     at that chunk size. If "not supported" ever recurs in practice, check the real `CK_RV` before assuming
-     it's a genuine capability gap rather than `cDecryptChunkSize` still being too large for that target;
+   - `DecryptMultiPart` reports `ErrorEnum::eNotSupported` only when the token answers
+     `C_DecryptUpdate`/`C_DecryptFinal` with `CKR_FUNCTION_NOT_SUPPORTED` or `CKR_MECHANISM_INVALID`. Any
+     other `CK_RV` is returned as is: notably `CKR_DEVICE_MEMORY` means `cDecryptChunkSize` is too large for
+     that target, not that multi-part decryption is unsupported. On any error the operation is terminated, so
+     the cached session stays usable for the next layer;
    - either way, the key's own value is never read by this code — only PKCS11 operations run on the token;
-   - output is staged to a temporary file and only put in place once decryption, including the
+   - output is staged to a uniquely named temporary file and only put in place once decryption, including the
      authentication tag check, fully succeeds. If the tag doesn't match — wrong key, modified or
      truncated blob — `Decrypt` fails with `ErrorEnum::eInvalidChecksum` and the staged output is deleted,
      so unauthenticated plaintext is never left on disk.

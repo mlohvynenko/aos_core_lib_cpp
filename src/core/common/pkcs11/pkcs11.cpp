@@ -774,67 +774,15 @@ Error SessionContext::DecryptMultiPart(CK_MECHANISM_PTR mechanism, ObjectHandle 
     // actually produced is handed back to the receiver.
     auto& buffer = chunkReceiver.GetBuffer();
 
-    auto deliver = [&](CK_ULONG size) -> Error {
-        LOG_DBG() << "Delivering decrypted chunk" << Log::Field("size", size);
-
-        if (size == 0) {
-            return ErrorEnum::eNone;
-        }
-
-        return chunkReceiver.OnChunk(Array<uint8_t>(buffer.Get(), size));
-    };
-
-    bool   anyChunkDecrypted = false;
-    size_t i                 = 0;
-
-    while (true) {
-        auto [chunk, err] = chunkProvider.NextChunk();
-        if (err.Is(ErrorEnum::eEOF)) {
-            break;
-        }
-
-        LOG_DBG() << "Received chunk" << Log::Field("index", i) << Log::Field("size", chunk.Size());
-
-        if (!err.IsNone()) {
-            return err;
-        }
-
-        i++;
-
-        CK_ULONG outSize = buffer.MaxSize();
-
-        err = DecryptUpdate(chunk, buffer.Get(), &outSize);
-        if (!err.IsNone()) {
-            // Some PKCS11 modules don't support multi-part operations for AEAD mechanisms like
-            // CKM_AES_GCM at all: they only fail once actual data is pushed through
-            // C_DecryptUpdate, not at C_DecryptInit. Nothing has been consumed from chunkProvider
-            // except this one chunk, and nothing has been handed to chunkReceiver, so if it's the very
-            // first, the caller can safely retry via a fresh, single-shot decrypt instead.
-            if (!anyChunkDecrypted) {
-                return AOS_ERROR_WRAP(ErrorEnum::eNotSupported);
-            }
-
-            return err;
-        }
-
-        anyChunkDecrypted = true;
-
-        if (err = deliver(outSize); !err.IsNone()) {
-            return err;
-        }
-    }
-
-    CK_ULONG finalSize = buffer.MaxSize();
-
-    if (auto err = DecryptFinal(buffer.Get(), &finalSize); !err.IsNone()) {
-        if (!anyChunkDecrypted) {
-            return AOS_ERROR_WRAP(ErrorEnum::eNotSupported);
-        }
+    if (auto err = DecryptParts(chunkProvider, chunkReceiver, buffer); !err.IsNone()) {
+        // the operation may still be active (e.g. the provider or receiver failed, not the token): terminate it,
+        // so the next C_DecryptInit on this session isn't rejected with CKR_OPERATION_ACTIVE.
+        AbortDecrypt(buffer);
 
         return err;
     }
 
-    return deliver(finalSize);
+    return ErrorEnum::eNone;
 }
 
 SessionHandle SessionContext::GetHandle() const
@@ -921,6 +869,87 @@ Error SessionContext::Decrypt(const Array<uint8_t>& data, CK_BYTE_PTR result, CK
     return ErrorEnum::eNone;
 }
 
+Error SessionContext::DecryptParts(
+    crypto::ChunkProviderItf& chunkProvider, crypto::ChunkReceiverItf& chunkReceiver, Array<uint8_t>& buffer) const
+{
+    auto deliver = [&chunkReceiver, &buffer](CK_ULONG size) -> Error {
+        LOG_DBG() << "Delivering decrypted chunk" << Log::Field("size", size);
+
+        if (size == 0) {
+            return ErrorEnum::eNone;
+        }
+
+        return chunkReceiver.OnChunk(Array<uint8_t>(buffer.Get(), size));
+    };
+
+    size_t i = 0;
+
+    while (true) {
+        auto [chunk, err] = chunkProvider.NextChunk();
+        if (err.Is(ErrorEnum::eEOF)) {
+            break;
+        }
+
+        LOG_DBG() << "Received chunk" << Log::Field("index", i) << Log::Field("size", chunk.Size());
+
+        if (!err.IsNone()) {
+            return err;
+        }
+
+        i++;
+
+        CK_ULONG outSize = buffer.MaxSize();
+
+        err = DecryptUpdate(chunk, buffer.Get(), &outSize);
+        if (!err.IsNone()) {
+            return ConvertMultiPartError(err);
+        }
+
+        err = deliver(outSize);
+        if (!err.IsNone()) {
+            return err;
+        }
+    }
+
+    CK_ULONG finalSize = buffer.MaxSize();
+
+    if (auto err = DecryptFinal(buffer.Get(), &finalSize); !err.IsNone()) {
+        return ConvertMultiPartError(err);
+    }
+
+    return deliver(finalSize);
+}
+
+Error SessionContext::ConvertMultiPartError(const Error& err)
+{
+    // Some PKCS11 modules don't support multi-part operations for a mechanism at all and only say so once data is
+    // pushed through C_DecryptUpdate/C_DecryptFinal, not at C_DecryptInit. Anything else (e.g. CKR_DEVICE_MEMORY
+    // for a chunk too large for the token) is returned as is, so the actual cause isn't hidden.
+    if (err.Errno() == static_cast<int32_t>(CKR_FUNCTION_NOT_SUPPORTED)
+        || err.Errno() == static_cast<int32_t>(CKR_MECHANISM_INVALID)) {
+        return AOS_ERROR_WRAP(Error(ErrorEnum::eNotSupported, "multi-part decryption not supported by token"));
+    }
+
+    return err;
+}
+
+void SessionContext::AbortDecrypt(Array<uint8_t>& buffer) const
+{
+    // C_DecryptFinal terminates the operation unless it fails with CKR_BUFFER_TOO_SMALL; if no operation is active
+    // any more (a failed C_DecryptUpdate/C_DecryptFinal already terminated it), it's a harmless
+    // CKR_OPERATION_NOT_INITIALIZED. Whatever it outputs is discarded.
+    if (CK_ULONG size = buffer.MaxSize();
+        DecryptFinal(buffer.Get(), &size).Errno() != static_cast<int32_t>(CKR_BUFFER_TOO_SMALL)) {
+        return;
+    }
+
+    // PKCS#11 3.0: C_DecryptInit with a NULL mechanism terminates the active decryption operation. Older tokens may
+    // ignore it, but CTR never holds output back for C_DecryptFinal, so it isn't needed for the blob decryption path.
+    if (mFunctionList && mFunctionList->C_DecryptInit) {
+        (void)mFunctionList->C_DecryptInit(mHandle, nullptr, CK_INVALID_HANDLE);
+    }
+}
+
 Error SessionContext::DecryptUpdate(const Array<uint8_t>& data, CK_BYTE_PTR result, CK_ULONG_PTR resultSize) const
 {
     if (!mFunctionList || !mFunctionList->C_DecryptUpdate) {
@@ -929,8 +958,8 @@ Error SessionContext::DecryptUpdate(const Array<uint8_t>& data, CK_BYTE_PTR resu
 
     LOG_DBG() << "Calling C_DecryptUpdate" << Log::Field("dataSize", data.Size());
 
-    if (CK_RV rv
-        = mFunctionList->C_DecryptUpdate(mHandle, const_cast<uint8_t*>(data.Get()), data.Size(), result, resultSize);
+    if (CK_RV rv = mFunctionList->C_DecryptUpdate(
+            mHandle, const_cast<uint8_t*>(data.Get()), data.Size(), result, resultSize); // NOSONAR cpp:M23_090
         rv != CKR_OK) {
         LOG_ERR() << "C_DecryptUpdate failed" << Log::Field("rv", static_cast<int32_t>(rv));
 
@@ -946,8 +975,7 @@ Error SessionContext::DecryptFinal(CK_BYTE_PTR result, CK_ULONG_PTR resultSize) 
         return ErrorEnum::eWrongState;
     }
 
-    CK_RV rv = mFunctionList->C_DecryptFinal(mHandle, result, resultSize);
-    if (rv != CKR_OK) {
+    if (CK_RV rv = mFunctionList->C_DecryptFinal(mHandle, result, resultSize); rv != CKR_OK) {
         return static_cast<int32_t>(rv);
     }
 
@@ -1374,6 +1402,11 @@ Error Utils::DeletePrivateKey(const PrivateKey& key)
         return err;
     }
 
+    // a symmetric (CKO_SECRET_KEY) key has no public object: its pub handle is CK_INVALID_HANDLE.
+    if (key.GetPubHandle() == CK_INVALID_HANDLE) {
+        return ErrorEnum::eNone;
+    }
+
     return mSession->DestroyObject(key.GetPubHandle());
 }
 
@@ -1569,6 +1602,30 @@ RetWithError<PrivateKey> Utils::ExportPrivateKey(
 {
     switch (keyType) {
     case CKK_AES: {
+        // AESPrivateKey is AES-256 only: don't silently accept a weaker key that happens to share the id/label.
+        StaticArray<Array<uint8_t>, 1>         attrValues;
+        StaticArray<AttributeType, 1>          attrTypes;
+        StaticArray<uint8_t, sizeof(CK_ULONG)> valueLen;
+
+        (void)attrTypes.PushBack(CKA_VALUE_LEN);
+        (void)attrValues.PushBack(valueLen);
+
+        if (auto err = mSession->GetAttributeValues(privKeyHandle, attrTypes, attrValues); !err.IsNone()) {
+            return {{}, AOS_ERROR_WRAP(err)};
+        }
+
+        CK_ULONG keySize = 0;
+
+        if (attrValues[0].Size() != sizeof(keySize)) {
+            return {{}, AOS_ERROR_WRAP(Error(ErrorEnum::eFailed, "unexpected CKA_VALUE_LEN size"))};
+        }
+
+        (void)memcpy(&keySize, attrValues[0].Get(), sizeof(keySize));
+
+        if (keySize != AESPrivateKey::cKeySize) {
+            return {{}, AOS_ERROR_WRAP(Error(ErrorEnum::eInvalidArgument, "AES key is not 256 bits"))};
+        }
+
         // no public part to look up: pubKeyHandle is unused (0) for a symmetric key.
         auto cryptoKey = MakeShared<AESPrivateKey>(&mAllocator, mSession, privKeyHandle);
         if (!cryptoKey) {

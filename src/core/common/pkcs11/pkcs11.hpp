@@ -459,11 +459,11 @@ public:
      * @param privKey the handle of the private/secret key.
      * @param chunkProvider supplies ciphertext chunks (and owns their storage).
      * @param chunkReceiver receives decrypted chunks (and owns their storage).
-     * @return Error. If the very first C_DecryptUpdate call fails (nothing decrypted yet), this
-     * returns ErrorEnum::eNotSupported: some PKCS11 modules don't support multi-part operations for
-     * AEAD mechanisms at all, and only fail once actual data is pushed through, not at
-     * C_DecryptInit. The caller can safely retry via a fresh, single-shot Decrypt() instead. A
-     * failure after that point is a real error (e.g. a bad tag), not a capability gap.
+     * @return Error. ErrorEnum::eNotSupported if C_DecryptUpdate/C_DecryptFinal fails with
+     * CKR_FUNCTION_NOT_SUPPORTED or CKR_MECHANISM_INVALID: some PKCS11 modules don't support multi-part
+     * operations for a mechanism at all, and only say so once data is pushed through, not at C_DecryptInit.
+     * Any other token error (e.g. CKR_DEVICE_MEMORY for a too large chunk) is returned as is. On any error
+     * the decrypt operation is terminated, so the session is ready for a new one.
      */
     Error DecryptMultiPart(CK_MECHANISM_PTR mechanism, ObjectHandle privKey, crypto::ChunkProviderItf& chunkProvider,
         crypto::ChunkReceiverItf& chunkReceiver) const;
@@ -493,8 +493,13 @@ private:
 
     Error DecryptInit(CK_MECHANISM_PTR mechanism, ObjectHandle privKey) const;
     Error Decrypt(const Array<uint8_t>& data, CK_BYTE_PTR result, CK_ULONG_PTR resultSize) const;
-    Error DecryptUpdate(const Array<uint8_t>& data, CK_BYTE_PTR result, CK_ULONG_PTR resultSize) const;
-    Error DecryptFinal(CK_BYTE_PTR result, CK_ULONG_PTR resultSize) const;
+    Error DecryptParts(
+        crypto::ChunkProviderItf& chunkProvider, crypto::ChunkReceiverItf& chunkReceiver, Array<uint8_t>& buffer) const;
+    void AbortDecrypt(Array<uint8_t>& buffer) const;
+
+    static Error ConvertMultiPartError(const Error& err);
+    Error        DecryptUpdate(const Array<uint8_t>& data, CK_BYTE_PTR result, CK_ULONG_PTR resultSize) const;
+    Error        DecryptFinal(CK_BYTE_PTR result, CK_ULONG_PTR resultSize) const;
 
     Error FindObjectsInit(const Array<ObjectAttribute>& templ) const;
     Error FindObjects(Array<ObjectHandle>& objects) const;

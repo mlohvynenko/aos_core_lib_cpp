@@ -243,6 +243,11 @@ private:
 class AESPrivateKey : public crypto::PrivateKeyItf {
 public:
     /**
+     * Supported key size in bytes (CKA_VALUE_LEN): AES-256 only.
+     */
+    static constexpr CK_ULONG cKeySize = 32;
+
+    /**
      * Constructs object instance.
      *
      * @param session session context.
@@ -305,14 +310,24 @@ private:
     static constexpr CK_ULONG cCTRCounterBits = crypto::AESCipherItf::cBlockSize * 8;
     // OP-TEE's PKCS11 TA (at least up to 4.x) misreads ulCounterBits as an increment and rejects anything
     // but 1 with CKR_MECHANISM_PARAM_INVALID, while still incrementing the whole 128-bit block - i.e. it
-    // behaves exactly like cCTRCounterBits. Only used as a retry once a token rejects cCTRCounterBits:
-    // a spec-compliant token would treat it as a 1-bit counter that wraps every other block.
+    // behaves exactly like cCTRCounterBits. Only used once a token rejects cCTRCounterBits, and only after
+    // VerifyFallbackCounter has confirmed the token really behaves that way: a spec-compliant token would treat
+    // it as a 1-bit counter that wraps every other block.
     static constexpr CK_ULONG cOPTEECTRCounterBits = 1;
 
-    // Runs op(mechanism) with options converted to a PKCS11 mechanism, retrying a CTR mechanism with
-    // cOPTEECTRCounterBits if the token rejects cCTRCounterBits at init.
+    // Runs op(mechanism) with options converted to a PKCS11 mechanism, using the CTR counter width this token
+    // accepts (see GetCTRCounterBits).
     template <typename Op>
     Error WithMechanism(const crypto::DecryptionOptions& options, Op op) const;
+
+    // Returns the CTR counter width to use with this token, determined on first use - before any caller data is
+    // consumed - by a single-block probe with cCTRCounterBits, falling back to cOPTEECTRCounterBits if the token
+    // rejects it and VerifyFallbackCounter passes. The result is cached.
+    Error GetCTRCounterBits(CK_ULONG& counterBits) const;
+
+    // Known-answer check that, with cOPTEECTRCounterBits, the token carries the counter across the whole block
+    // rather than wrapping a 1-bit counter.
+    Error VerifyFallbackCounter() const;
 
     // Only exists to satisfy PrivateKeyItf::GetPublic's reference-returning signature for a key type that
     // has no public part; GetKeyType/IsEqual are never meaningfully called on it.
@@ -330,6 +345,8 @@ private:
     SharedPtr<SessionContext> mSession;
     ObjectHandle              mKeyHandle;
     NoPublicKey               mNoPublicKey;
+    mutable Mutex             mMutex;
+    mutable CK_ULONG          mCTRCounterBits = 0;
 };
 
 } // namespace aos::pkcs11

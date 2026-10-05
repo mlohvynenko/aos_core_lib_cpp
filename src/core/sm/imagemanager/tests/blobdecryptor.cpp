@@ -90,9 +90,8 @@ Action<Error(const String&, const Array<uint8_t>&, const Array<uint8_t>&, CertIn
 Action<RetWithError<SharedPtr<crypto::PrivateKeyItf>>(const String&)> ReturnKey(
     const SharedPtr<crypto::PrivateKeyItf>& key)
 {
-    return Invoke([key](const String&) -> RetWithError<SharedPtr<crypto::PrivateKeyItf>> {
-        return {key, ErrorEnum::eNone};
-    });
+    return Invoke(
+        [key](const String&) -> RetWithError<SharedPtr<crypto::PrivateKeyItf>> { return {key, ErrorEnum::eNone}; });
 }
 
 Bytes TagOf(const Bytes& blob)
@@ -123,13 +122,98 @@ Action<Error(const Array<uint8_t>&, const crypto::DecryptionOptions&, Array<uint
     });
 }
 
+// Deterministic but never repeating "random" source: every call yields different bytes, so staged file names
+// stay unique across calls just as with a real generator.
+class CountingRandom : public crypto::RandomItf {
+public:
+    RetWithError<uint64_t> RandInt(uint64_t maxValue) override
+    {
+        return {mCounter++ % (maxValue + 1), ErrorEnum::eNone};
+    }
+
+    Error RandBuffer(Array<uint8_t>& buffer, size_t size = 0) override
+    {
+        if (auto err = buffer.Resize(size != 0 ? size : buffer.MaxSize()); !err.IsNone()) {
+            return err;
+        }
+
+        mCounter++;
+
+        for (size_t i = 0; i < buffer.Size(); i++) {
+            buffer[i] = static_cast<uint8_t>(mCounter >> ((i % sizeof(mCounter)) * 8));
+        }
+
+        return ErrorEnum::eNone;
+    }
+
+private:
+    uint64_t mCounter = 0;
+};
+
+// Random source that always fails.
+class FailingRandom : public crypto::RandomItf {
+public:
+    RetWithError<uint64_t> RandInt(uint64_t maxValue) override
+    {
+        (void)maxValue;
+
+        return {0, ErrorEnum::eFailed};
+    }
+
+    Error RandBuffer(Array<uint8_t>& buffer, size_t size = 0) override
+    {
+        (void)buffer;
+        (void)size;
+
+        return ErrorEnum::eFailed;
+    }
+};
+
+// Returns the staged output files (decryptedPath.<suffix>.tmp) present next to decryptedPath.
+std::vector<std::string> StagedFiles(const std::string& decryptedPath)
+{
+    const auto               dir    = std::filesystem::path(decryptedPath).parent_path();
+    const auto               prefix = std::filesystem::path(decryptedPath).filename().string() + ".";
+    std::vector<std::string> result;
+
+    for (const auto& entry : std::filesystem::directory_iterator(dir)) {
+        const auto name = entry.path().filename().string();
+
+        if (name.rfind(prefix, 0) == 0 && name.size() > prefix.size() + 4
+            && name.compare(name.size() - 4, 4, ".tmp") == 0) {
+            result.push_back(entry.path().string());
+        }
+    }
+
+    return result;
+}
+
 // Allocator that can be switched to fail, to exercise out-of-memory paths.
 class SwitchAllocator : public AllocatorItf {
 public:
-    void* Allocate(size_t size) override { return mFail ? nullptr : mHeap.Allocate(size); }
-    void  Free(void* data) override { mHeap.Free(data); }
+    void* Allocate(size_t size) override
+    {
+        if (mFail) {
+            return nullptr;
+        }
 
-    bool mFail = false;
+        // with mFailSize set, fails allocations of that size once mFailSkip of them have succeeded.
+        if (mFailSize != 0 && size == mFailSize) {
+            if (mFailSkip == 0) {
+                return nullptr;
+            }
+
+            mFailSkip--;
+        }
+
+        return mHeap.Allocate(size);
+    }
+
+    void Free(void* data) override { mHeap.Free(data); }
+
+    bool   mFail     = false;
+    size_t mFailSize = 0;
+    size_t mFailSkip = 0;
 
 private:
     HeapAllocator mHeap;
@@ -151,7 +235,7 @@ protected:
     {
         tests::utils::InitLog();
 
-        ASSERT_TRUE(mDecryptor.Init(mAllocator, mCertProvider, mCertLoader, cCertType).IsNone());
+        ASSERT_TRUE(mDecryptor.Init(mAllocator, mCertProvider, mCertLoader, mRandom, cCertType).IsNone());
 
         mKey = MakeShared<StrictMock<crypto::PrivateKeyMock>>(&mAllocator);
         ASSERT_TRUE(mKey);
@@ -159,6 +243,9 @@ protected:
 
     void TearDown() override
     {
+        // whether decryption succeeded or not, no staged output may be left behind.
+        EXPECT_THAT(StagedFiles(mDecryptedPath), IsEmpty());
+
         (void)fs::Remove(mEncryptedPath.c_str());
         (void)fs::Remove(mDecryptedPath.c_str());
     }
@@ -170,6 +257,7 @@ protected:
 
     StrictMock<iamclient::CertProviderMock>       mCertProvider;
     StrictMock<crypto::CertLoaderMock>            mCertLoader;
+    CountingRandom                                mRandom;
     SharedPtr<StrictMock<crypto::PrivateKeyMock>> mKey;
 
     BlobDecryptor mDecryptor;
@@ -405,16 +493,67 @@ TEST_F(BlobDecryptorTest, CiphertextNotFullyConsumedIsRejected)
     EXPECT_FALSE(std::filesystem::exists(mDecryptedPath));
 }
 
+TEST_F(BlobDecryptorTest, MissingEncryptedFileIsReturned)
+{
+    EXPECT_CALL(mCertProvider, GetCert(_, _, _, _)).WillOnce(ReturnCert(cKeyURL));
+    EXPECT_CALL(mCertLoader, LoadPrivKeyByURL(_)).WillOnce(ReturnKey(mKey));
+
+    EXPECT_FALSE(mDecryptor.Decrypt(mEncryptedPath.c_str(), mDecryptedPath.c_str()).IsNone());
+    EXPECT_FALSE(std::filesystem::exists(mDecryptedPath));
+}
+
+TEST_F(BlobDecryptorTest, RandomFailureIsReturnedWithoutCallingKey)
+{
+    FailingRandom random;
+    BlobDecryptor decryptor;
+
+    ASSERT_TRUE(decryptor.Init(mAllocator, mCertProvider, mCertLoader, random, cCertType).IsNone());
+
+    WriteBytes(mEncryptedPath, Pattern(cIVLen + cTagLen, 19));
+
+    EXPECT_CALL(mCertProvider, GetCert(_, _, _, _)).WillOnce(ReturnCert(cKeyURL));
+    EXPECT_CALL(mCertLoader, LoadPrivKeyByURL(_)).WillOnce(ReturnKey(mKey));
+
+    EXPECT_TRUE(decryptor.Decrypt(mEncryptedPath.c_str(), mDecryptedPath.c_str()).Is(ErrorEnum::eFailed));
+    EXPECT_FALSE(std::filesystem::exists(mDecryptedPath));
+}
+
+TEST_F(BlobDecryptorTest, UnwritableOutputIsReturnedWithoutCallingKey)
+{
+    WriteBytes(mEncryptedPath, Pattern(cIVLen + cTagLen, 20));
+
+    EXPECT_CALL(mCertProvider, GetCert(_, _, _, _)).WillOnce(ReturnCert(cKeyURL));
+    EXPECT_CALL(mCertLoader, LoadPrivKeyByURL(_)).WillOnce(ReturnKey(mKey));
+
+    EXPECT_FALSE(mDecryptor.Decrypt(mEncryptedPath.c_str(), "/tmp/blobdecryptor_no_such_dir/layer.dec").IsNone());
+}
+
+TEST_F(BlobDecryptorTest, UnexpectedKeystreamBlockSizeIsRejected)
+{
+    WriteBytes(mEncryptedPath, Pattern(cIVLen + cTagLen, 21));
+
+    EXPECT_CALL(mCertProvider, GetCert(_, _, _, _)).WillOnce(ReturnCert(cKeyURL));
+    EXPECT_CALL(mCertLoader, LoadPrivKeyByURL(_)).WillOnce(ReturnKey(mKey));
+    EXPECT_CALL(*mKey, Decrypt(_, _, _))
+        .WillOnce(Invoke([](const Array<uint8_t>&, const crypto::DecryptionOptions&, Array<uint8_t>& result) {
+            return result.Resize(cBlockLen / 2);
+        }));
+
+    EXPECT_TRUE(mDecryptor.Decrypt(mEncryptedPath.c_str(), mDecryptedPath.c_str()).Is(ErrorEnum::eFailed));
+    EXPECT_FALSE(std::filesystem::exists(mDecryptedPath));
+}
+
 TEST(BlobDecryptorInitTest, InitFailsIfCertTypeIsTooLong)
 {
     HeapAllocator                           allocator;
     StrictMock<iamclient::CertProviderMock> certProvider;
     StrictMock<crypto::CertLoaderMock>      certLoader;
+    CountingRandom                          random;
     BlobDecryptor                           decryptor;
 
     const std::string tooLong(cCertTypeLen + 1, 'a');
 
-    EXPECT_TRUE(decryptor.Init(allocator, certProvider, certLoader, tooLong.c_str()).Is(ErrorEnum::eNoMemory));
+    EXPECT_TRUE(decryptor.Init(allocator, certProvider, certLoader, random, tooLong.c_str()).Is(ErrorEnum::eNoMemory));
 }
 
 TEST(BlobDecryptorInitTest, DecryptFailsIfAllocatorIsOutOfMemoryResolvingKey)
@@ -422,15 +561,55 @@ TEST(BlobDecryptorInitTest, DecryptFailsIfAllocatorIsOutOfMemoryResolvingKey)
     SwitchAllocator                         allocator;
     StrictMock<iamclient::CertProviderMock> certProvider;
     StrictMock<crypto::CertLoaderMock>      certLoader;
+    CountingRandom                          random;
     BlobDecryptor                           decryptor;
 
-    ASSERT_TRUE(decryptor.Init(allocator, certProvider, certLoader, cCertType).IsNone());
+    ASSERT_TRUE(decryptor.Init(allocator, certProvider, certLoader, random, cCertType).IsNone());
 
     allocator.mFail = true;
 
     // neither GetCert nor LoadPrivKeyByURL is reached (StrictMock): the temporary CertInfo used to resolve
     // the key can't be allocated. No encrypted file is needed: this fails before any file I/O.
     EXPECT_TRUE(decryptor.Decrypt("/nonexistent.enc", "/nonexistent.dec").Is(ErrorEnum::eNoMemory));
+}
+
+TEST(BlobDecryptorInitTest, DecryptFailsIfChunkBuffersCanNotBeAllocated)
+{
+    const std::string encryptedPath = "/tmp/blobdecryptor_oom_layer.enc";
+    const std::string decryptedPath = "/tmp/blobdecryptor_oom_layer.dec";
+
+    WriteBytes(encryptedPath, Pattern(cIVLen + 64 + cTagLen, 22));
+
+    // the plaintext buffer is allocated first, the ciphertext chunk buffer once H has been obtained from the key.
+    for (size_t skip = 0; skip < 2; skip++) {
+        HeapAllocator                           keyAllocator;
+        SwitchAllocator                         allocator;
+        StrictMock<iamclient::CertProviderMock> certProvider;
+        StrictMock<crypto::CertLoaderMock>      certLoader;
+        CountingRandom                          random;
+        BlobDecryptor                           decryptor;
+
+        auto key = MakeShared<StrictMock<crypto::PrivateKeyMock>>(&keyAllocator);
+        ASSERT_TRUE(key);
+
+        ASSERT_TRUE(decryptor.Init(allocator, certProvider, certLoader, random, cCertType).IsNone());
+
+        allocator.mFailSize = cDecryptChunkSize;
+        allocator.mFailSkip = skip;
+
+        EXPECT_CALL(certProvider, GetCert(_, _, _, _)).WillOnce(ReturnCert(cKeyURL));
+        EXPECT_CALL(certLoader, LoadPrivKeyByURL(_)).WillOnce(ReturnKey(key));
+
+        if (skip != 0) {
+            EXPECT_CALL(*key, Decrypt(_, _, _)).WillOnce(ReturnKeystream({}, {}));
+        }
+
+        EXPECT_TRUE(decryptor.Decrypt(encryptedPath.c_str(), decryptedPath.c_str()).Is(ErrorEnum::eNoMemory));
+        EXPECT_FALSE(std::filesystem::exists(decryptedPath));
+        EXPECT_THAT(StagedFiles(decryptedPath), IsEmpty());
+    }
+
+    (void)fs::Remove(encryptedPath.c_str());
 }
 
 /***********************************************************************************************************************
@@ -448,14 +627,14 @@ protected:
         std::filesystem::remove_all(cTestDir);
         std::filesystem::create_directories(cTestDir);
 
-        ASSERT_TRUE(fs::WriteStringToFile(mPINSource.c_str(), mPIN, 0664).IsNone());
+        ASSERT_TRUE(fs::WriteStringToFile(mPINSource.c_str(), mPIN, 0600).IsNone());
 
         ASSERT_TRUE(mCryptoFactory.Init(mAllocator).IsNone());
         mCryptoProvider = &mCryptoFactory.GetCryptoProvider();
 
         ASSERT_TRUE(mSoftHSMEnv.Init(mAllocator, mPIN, mTokenLabel).IsNone());
         ASSERT_TRUE(mCertLoader.Init(mAllocator, *mCryptoProvider, mSoftHSMEnv.GetManager()).IsNone());
-        ASSERT_TRUE(mDecryptor.Init(mAllocator, mCertProvider, mCertLoader, cCertType).IsNone());
+        ASSERT_TRUE(mDecryptor.Init(mAllocator, mCertProvider, mCertLoader, *mCryptoProvider, cCertType).IsNone());
 
         // this cert module is dedicated to the layer key: its key URL's own id/label directly identify the
         // CKO_SECRET_KEY object imported by ImportSecretKey below (see LoadPrivKeyByURL/FindPrivateKey).

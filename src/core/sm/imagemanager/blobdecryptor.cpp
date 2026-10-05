@@ -16,6 +16,9 @@ namespace {
 
 constexpr auto cBlockSize = crypto::AESCipherItf::cBlockSize;
 
+// random bytes in a staged output file's name.
+constexpr size_t cStagedSuffixSize = 16;
+
 // Low 32 bits of the counter blocks GCM derives from a 96-bit IV: J0 = IV || 0x00000001 encrypts the tag,
 // the payload is plain CTR starting at inc32(J0).
 constexpr uint8_t cJ0CounterSuffix[]      = {0x00, 0x00, 0x00, 0x01};
@@ -71,7 +74,7 @@ public:
     void Finalize(uint8_t (&out)[cBlockSize])
     {
         if (mPendingSize != 0) {
-            memset(mPending + mPendingSize, 0, cBlockSize - mPendingSize);
+            (void)memset(mPending + mPendingSize, 0, cBlockSize - mPendingSize);
             Absorb(mPending);
             mPendingSize = 0;
         }
@@ -82,7 +85,7 @@ public:
         StoreBE64(static_cast<uint64_t>(mDataSize) * 8, lengths + 8);
         Absorb(lengths);
 
-        memcpy(out, mY, cBlockSize);
+        (void)memcpy(out, mY, cBlockSize);
     }
 
 private:
@@ -107,10 +110,10 @@ private:
     // Y = (Y ^ block) * H
     void Absorb(const uint8_t* block)
     {
-        static constexpr uint64_t cLast4[16] = {0x0000, 0x1c20, 0x3840, 0x2460, 0x7080, 0x6ca0, 0x48c0, 0x54e0,
-            0xe100, 0xfd20, 0xd940, 0xc560, 0x9180, 0x8da0, 0xa9c0, 0xb5e0};
+        static constexpr uint64_t cLast4[16] = {0x0000, 0x1c20, 0x3840, 0x2460, 0x7080, 0x6ca0, 0x48c0, 0x54e0, 0xe100,
+            0xfd20, 0xd940, 0xc560, 0x9180, 0x8da0, 0xa9c0, 0xb5e0};
 
-        uint8_t x[cBlockSize];
+        uint8_t x[cBlockSize] {};
 
         for (size_t i = 0; i < cBlockSize; i++) {
             x[i] = mY[i] ^ block[i];
@@ -120,7 +123,7 @@ private:
         uint64_t zh = mHH[lo];
         uint64_t zl = mHL[lo];
 
-        for (int i = 15; i >= 0; i--) {
+        for (int32_t i = 15; i >= 0; i--) {
             lo         = x[i] & 0xf;
             uint8_t hi = (x[i] >> 4) & 0xf;
 
@@ -191,9 +194,9 @@ Error KeystreamBlock(const crypto::PrivateKeyItf& key, const crypto::CTRDecrypti
 
 // Adapts an open fs::File into a crypto::ChunkProviderItf, so the whole ciphertext file never needs to be
 // read into memory before decrypting it. Delivers exactly size bytes from the file's current position, so
-// trailing data (the GCM tag) is left out, and feeds every delivered byte into ghash. buffer is allocator-owned by the caller (BlobDecryptor, which has
-// an AllocatorItf) rather than by this class itself: a chunk-sized (tens of KiB) buffer would blow the
-// stack budget on a stack-constrained target if it lived in a local variable instead.
+// trailing data (the GCM tag) is left out, and feeds every delivered byte into ghash. buffer is allocator-owned by the
+// caller (BlobDecryptor, which has an AllocatorItf) rather than by this class itself: a chunk-sized (tens of KiB)
+// buffer would blow the stack budget on a stack-constrained target if it lived in a local variable instead.
 class FileChunkProvider : public crypto::ChunkProviderItf {
 public:
     FileChunkProvider(fs::File& file, Array<uint8_t>& buffer, size_t size, GHash& ghash)
@@ -270,11 +273,12 @@ private:
  **********************************************************************************************************************/
 
 Error BlobDecryptor::Init(AllocatorItf& allocator, iamclient::CertProviderItf& certProvider,
-    crypto::CertLoaderItf& certLoader, const String& certType)
+    crypto::CertLoaderItf& certLoader, crypto::RandomItf& random, const String& certType)
 {
     mAllocator    = &allocator;
     mCertProvider = &certProvider;
     mCertLoader   = &certLoader;
+    mRandom       = &random;
 
     if (auto err = mCertType.Assign(certType); !err.IsNone()) {
         return AOS_ERROR_WRAP(err);
@@ -310,19 +314,24 @@ Error BlobDecryptor::Decrypt(const String& encryptedPath, const String& decrypte
         return AOS_ERROR_WRAP(ErrorEnum::eNoMemory);
     }
 
-    auto freePlain = DeferRelease(mAllocator, [&](AllocatorItf* allocator) { allocator->Free(plainBuf); });
+    auto freePlain = DeferRelease(mAllocator, [plainBuf](AllocatorItf* allocator) { allocator->Free(plainBuf); });
 
     Array<uint8_t> plaintext(static_cast<uint8_t*>(plainBuf), cDecryptChunkSize);
 
-    // staged to a deterministic sibling path and unconditionally removed, unless renamed into place on success
-    // below: decryptedPath itself is never touched unless the whole operation succeeds.
-    StaticString<cFilePathLen> stagedPath;
+    // staged to a uniquely named sibling path and unconditionally removed, unless renamed into place on success
+    // below: decryptedPath itself is never touched unless the whole operation succeeds. The random suffix keeps
+    // concurrent decryptions of the same blob, or a stage left behind by a crash, from colliding with this one.
+    StaticString<cStagedSuffixSize * 2> suffix;
 
-    if (auto err = stagedPath.Format("%s.gcmtmp", decryptedPath.CStr()); !err.IsNone()) {
+    if (auto err = crypto::GenerateRandomString<cStagedSuffixSize>(suffix, *mRandom); !err.IsNone()) {
         return AOS_ERROR_WRAP(err);
     }
 
-    auto cleanUp = DeferRelease(&stagedPath, [](const auto* path) { (void)fs::Remove(*path); });
+    StaticString<cFilePathLen> stagedPath;
+
+    if (auto err = stagedPath.Format("%s.%s.tmp", decryptedPath.CStr(), suffix.CStr()); !err.IsNone()) {
+        return AOS_ERROR_WRAP(err);
+    }
 
     fs::File output;
 
@@ -330,6 +339,9 @@ Error BlobDecryptor::Decrypt(const String& encryptedPath, const String& decrypte
     if (auto err = output.Open(stagedPath, fs::File::Mode::WriteNew, 0600); !err.IsNone()) {
         return AOS_ERROR_WRAP(err);
     }
+
+    // installed only once this call has created the stage, so it never removes a file it doesn't own.
+    auto cleanUp = DeferRelease(&stagedPath, [](const auto* path) { (void)fs::Remove(*path); });
 
     FileChunkReceiver chunkReceiver(output, plaintext);
 
@@ -380,8 +392,8 @@ RetWithError<SharedPtr<crypto::PrivateKeyItf>> BlobDecryptor::FetchKey()
     return {mKey, ErrorEnum::eNone};
 }
 
-Error BlobDecryptor::StreamDecrypt(const crypto::PrivateKeyItf& key, const String& encryptedPath,
-    size_t encryptedSize, crypto::ChunkReceiverItf& chunkReceiver) const
+Error BlobDecryptor::StreamDecrypt(const crypto::PrivateKeyItf& key, const String& encryptedPath, size_t encryptedSize,
+    crypto::ChunkReceiverItf& chunkReceiver) const
 {
     fs::File input;
 
@@ -431,13 +443,13 @@ Error BlobDecryptor::StreamDecrypt(const crypto::PrivateKeyItf& key, const Strin
         return AOS_ERROR_WRAP(ErrorEnum::eNoMemory);
     }
 
-    auto freeChunk = DeferRelease(mAllocator, [&](AllocatorItf* allocator) { allocator->Free(chunkBuf); });
+    auto freeChunk = DeferRelease(mAllocator, [chunkBuf](AllocatorItf* allocator) { allocator->Free(chunkBuf); });
 
     Array<uint8_t> chunk(static_cast<uint8_t*>(chunkBuf), cDecryptChunkSize);
 
     // the trailing tag is not passed on to the token: it's verified below instead.
-    FileChunkProvider chunkProvider(input, chunk,
-        encryptedSize - crypto::AESCipherItf::cGCMIVSize - crypto::AESCipherItf::cGCMTagSize, *ghash);
+    FileChunkProvider chunkProvider(
+        input, chunk, encryptedSize - crypto::AESCipherItf::cGCMIVSize - crypto::AESCipherItf::cGCMTagSize, *ghash);
 
     if (auto err = key.StreamDecrypt(chunkProvider, crypto::DecryptionOptions {ctrOptions}, chunkReceiver);
         !err.IsNone()) {
@@ -468,7 +480,7 @@ Error BlobDecryptor::StreamDecrypt(const crypto::PrivateKeyItf& key, const Strin
         return err;
     }
 
-    uint8_t expected[cBlockSize];
+    uint8_t expected[cBlockSize] = {};
 
     ghash->Finalize(expected);
 

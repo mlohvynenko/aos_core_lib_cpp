@@ -219,7 +219,7 @@ RetWithError<CK_MECHANISM> PKCS11AESMechConverter::Visit(const crypto::GCMDecryp
         return {{}, AOS_ERROR_WRAP(ErrorEnum::eInvalidArgument)};
     }
 
-    mGCMParams.pIv       = const_cast<uint8_t*>(options.mIV.Get());
+    mGCMParams.pIv       = const_cast<uint8_t*>(options.mIV.Get()); // NOSONAR cpp:M23_090
     mGCMParams.ulIvLen   = static_cast<CK_ULONG>(options.mIV.Size());
     mGCMParams.ulIvBits  = static_cast<CK_ULONG>(options.mIV.Size() * 8);
     mGCMParams.ulTagBits = crypto::AESCipherItf::cGCMTagSize * 8;
@@ -234,7 +234,7 @@ RetWithError<CK_MECHANISM> PKCS11AESMechConverter::Visit(const crypto::CTRDecryp
     }
 
     mCTRParams.ulCounterBits = mCTRCounterBits;
-    memcpy(mCTRParams.cb, options.mCounter.Get(), sizeof(mCTRParams.cb));
+    (void)memcpy(mCTRParams.cb, options.mCounter.Get(), sizeof(mCTRParams.cb));
 
     return CK_MECHANISM {CKM_AES_CTR, &mCTRParams, sizeof(mCTRParams)};
 }
@@ -283,30 +283,112 @@ Error AESPrivateKey::StreamDecrypt(crypto::ChunkProviderItf& chunkProvider, cons
 template <typename Op>
 Error AESPrivateKey::WithMechanism(const crypto::DecryptionOptions& options, Op op) const
 {
+    // both outlive op: the mechanism's parameters point into the visitor that produced it.
     PKCS11AESMechConverter visitor(cCTRCounterBits);
+    PKCS11AESMechConverter fallbackVisitor(cOPTEECTRCounterBits);
 
     auto [mech, err] = options.ApplyVisitor(visitor);
     if (!err.IsNone()) {
         return AOS_ERROR_WRAP(err);
     }
 
-    err = op(mech);
+    if (mech.mechanism == CKM_AES_CTR) {
+        CK_ULONG counterBits = 0;
 
-    // C_DecryptInit rejects the parameters before any data is consumed, so retrying is safe here.
-    if (mech.mechanism == CKM_AES_CTR && err.Errno() == static_cast<int32_t>(CKR_MECHANISM_PARAM_INVALID)) {
-        LOG_DBG() << "Token rejected CTR counter bits, retrying" << Log::Field("counterBits", cOPTEECTRCounterBits);
+        if (auto counterErr = GetCTRCounterBits(counterBits); !counterErr.IsNone()) {
+            return counterErr;
+        }
 
-        PKCS11AESMechConverter fallbackVisitor(cOPTEECTRCounterBits);
+        if (counterBits == cOPTEECTRCounterBits) {
+            Tie(mech, err) = options.ApplyVisitor(fallbackVisitor);
+            if (!err.IsNone()) {
+                return AOS_ERROR_WRAP(err);
+            }
+        }
+    }
 
-        Tie(mech, err) = options.ApplyVisitor(fallbackVisitor);
-        if (!err.IsNone()) {
+    return op(mech);
+}
+
+Error AESPrivateKey::GetCTRCounterBits(CK_ULONG& counterBits) const
+{
+    constexpr auto cBlockSize = crypto::AESCipherItf::cBlockSize;
+
+    LockGuard lock {mMutex};
+
+    if (mCTRCounterBits == 0) {
+        // probed with a single-shot decrypt of one block, so whatever the token rejects, no caller data has been
+        // consumed yet: the operation that needs the counter width only starts once it is known.
+        CK_AES_CTR_PARAMS params {cCTRCounterBits, {}};
+        CK_MECHANISM      mech {CKM_AES_CTR, &params, sizeof(params)};
+
+        StaticArray<uint8_t, cBlockSize> zeros;
+        StaticArray<uint8_t, cBlockSize> block;
+
+        if (auto err = zeros.Resize(zeros.MaxSize(), 0); !err.IsNone()) {
             return AOS_ERROR_WRAP(err);
         }
 
-        err = op(mech);
+        if (auto err = mSession->Decrypt(&mech, mKeyHandle, zeros, block); err.IsNone()) {
+            mCTRCounterBits = cCTRCounterBits;
+        } else if (err.Errno() == static_cast<int32_t>(CKR_MECHANISM_PARAM_INVALID)) {
+            LOG_DBG() << "Token rejected CTR counter bits, falling back"
+                      << Log::Field("counterBits", cOPTEECTRCounterBits);
+
+            if (auto verifyErr = VerifyFallbackCounter(); !verifyErr.IsNone()) {
+                return verifyErr;
+            }
+
+            mCTRCounterBits = cOPTEECTRCounterBits;
+        } else {
+            return AOS_ERROR_WRAP(err);
+        }
     }
 
-    return err;
+    counterBits = mCTRCounterBits;
+
+    return ErrorEnum::eNone;
+}
+
+Error AESPrivateKey::VerifyFallbackCounter() const
+{
+    constexpr auto cBlockSize = crypto::AESCipherItf::cBlockSize;
+
+    // T = 0^96 || 0xFFFFFFFF: its successor T + 1 = 0^95 1 || 0^32 needs a carry across the low 32 bits, while a
+    // 1-bit counter would wrap to T - 1 instead. Neither block is a keystream block of any GCM message with a
+    // 96-bit IV within GCM's length limit, and AES outputs don't reveal the key.
+    CK_AES_CTR_PARAMS params {cOPTEECTRCounterBits, {}};
+    CK_MECHANISM      mech {CKM_AES_CTR, &params, sizeof(params)};
+
+    (void)memset(params.cb + cBlockSize - 4, 0xff, 4);
+
+    StaticArray<uint8_t, cBlockSize * 2> zeros;
+    StaticArray<uint8_t, cBlockSize * 2> twoBlocks;
+    StaticArray<uint8_t, cBlockSize>     nextBlock;
+
+    if (auto err = zeros.Resize(zeros.MaxSize(), 0); !err.IsNone()) {
+        return AOS_ERROR_WRAP(err);
+    }
+
+    if (auto err = mSession->Decrypt(&mech, mKeyHandle, zeros, twoBlocks); !err.IsNone()) {
+        return AOS_ERROR_WRAP(err);
+    }
+
+    (void)memset(params.cb, 0, sizeof(params.cb));
+    params.cb[cBlockSize - 5] = 0x01;
+
+    if (auto err = mSession->Decrypt(&mech, mKeyHandle, Array<uint8_t>(zeros.Get(), cBlockSize), nextBlock);
+        !err.IsNone()) {
+        return AOS_ERROR_WRAP(err);
+    }
+
+    if (twoBlocks.Size() != cBlockSize * 2 || nextBlock.Size() != cBlockSize
+        || memcmp(twoBlocks.Get() + cBlockSize, nextBlock.Get(), cBlockSize) != 0) {
+        return AOS_ERROR_WRAP(
+            Error(ErrorEnum::eNotSupported, "token's CTR counter doesn't span the whole counter block"));
+    }
+
+    return ErrorEnum::eNone;
 }
 
 } // namespace aos::pkcs11
